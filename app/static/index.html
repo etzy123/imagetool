@@ -1,0 +1,396 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bisque grid check</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --page: #FEF3E8;      /* bisquegolf.com page */
+    --card: #F0EDEA;      /* bisquegolf.com product card */
+    --ink: #1C3A2C;       /* Bisque green */
+    --muted: #6E7B72;
+    --line: #E7DACB;
+    --flag: #F0832A;      /* sale-badge orange, used for anything off grid */
+    --ok: #2E6A4C;
+    --danger: #B3261E;
+    --white: #FFFFFF;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--page); color: var(--ink);
+    font: 15px/1.5 "Hanken Grotesk", system-ui, sans-serif; }
+  button, input, textarea, select { font: inherit; color: inherit; }
+  :focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+
+  header { display: flex; align-items: baseline; gap: 24px; flex-wrap: wrap;
+    padding: 28px 40px 0; }
+  h1 { font-size: 28px; font-weight: 700; letter-spacing: -0.02em; margin: 0; }
+  #job { color: var(--muted); font-size: 14px; flex: 1; min-width: 240px; }
+  #job b { color: var(--ink); font-weight: 600; }
+  .bar { height: 3px; background: var(--line); margin-top: 6px; max-width: 420px; }
+  .bar i { display: block; height: 100%; background: var(--ink); width: 0; transition: width .4s; }
+
+  nav.tools { display: flex; gap: 8px; padding: 20px 40px 0; flex-wrap: wrap; }
+  .btn { border: 1px solid var(--ink); background: transparent; padding: 9px 16px; border-radius: 999px;
+    cursor: pointer; font-weight: 500; }
+  .btn.solid { background: var(--ink); color: var(--page); }
+  .btn.warn { background: var(--flag); border-color: var(--flag); color: var(--white); }
+  .btn:disabled { opacity: .4; cursor: default; }
+  .btn[aria-expanded="true"] { background: var(--ink); color: var(--page); }
+
+  .panel { margin: 16px 40px 0; padding: 20px 24px; background: var(--white); border: 1px solid var(--line);
+    border-radius: 6px; max-width: 920px; }
+  .panel[hidden] { display: none; }
+  .panel p { margin: 0 0 14px; color: var(--muted); max-width: 64ch; }
+  .fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px 16px; }
+  label { display: grid; gap: 4px; font-size: 13px; color: var(--muted); }
+  input[type=text], input[type=number], textarea { border: 1px solid var(--line); border-radius: 4px;
+    padding: 8px 10px; background: var(--page); color: var(--ink); width: 100%; }
+  textarea { min-height: 110px; resize: vertical; }
+  .row { display: flex; gap: 12px; align-items: center; margin-top: 16px; flex-wrap: wrap; }
+  .check { display: flex; gap: 8px; align-items: center; flex-direction: row; color: var(--ink); font-size: 14px; }
+  .hint { font-size: 13px; color: var(--muted); }
+
+  .filters { display: flex; gap: 4px; padding: 28px 40px 0; flex-wrap: wrap; align-items: center; }
+  .filter { border: 0; background: transparent; padding: 6px 12px; border-radius: 999px; cursor: pointer; color: var(--muted); }
+  .filter[aria-pressed="true"] { background: var(--ink); color: var(--page); }
+  .filter .n { font-variant-numeric: tabular-nums; margin-left: 4px; opacity: .8; }
+  .spacer { flex: 1; }
+  .toggle { font-size: 14px; }
+
+  main { padding: 20px 40px 120px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 28px 14px; }
+  .empty { padding: 60px 0; color: var(--muted); max-width: 52ch; }
+  .empty strong { color: var(--ink); display: block; font-size: 18px; margin-bottom: 4px; }
+
+  .item { position: relative; }
+  .frame { position: relative; background: var(--card); overflow: hidden; cursor: pointer; }
+  .frame img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+  .frame img.broken { visibility: hidden; }
+  .canvas { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); pointer-events: none; }
+  .fitbox { position: absolute; outline: 1.5px dashed var(--flag); display: none; }
+  body.showbox .fitbox { display: block; }
+  .item.selected .frame { box-shadow: inset 0 0 0 3px var(--ink); }
+  .pick { position: absolute; top: 10px; left: 10px; width: 20px; height: 20px; accent-color: var(--ink); z-index: 2; }
+  .badge { position: absolute; top: 10px; right: 10px; background: var(--flag); color: var(--white); font-size: 12px;
+    font-weight: 600; padding: 2px 8px; z-index: 2; }
+  .badge.okb { background: var(--ok); }
+  .badge.muted { background: var(--muted); }
+  .flip { position: absolute; bottom: 10px; right: 10px; z-index: 2; font-size: 12px; padding: 4px 10px;
+    background: var(--white); border: 1px solid var(--line); border-radius: 999px; cursor: pointer; }
+  .meta { padding: 10px 2px 0; font-size: 13px; }
+  .meta a { color: var(--ink); text-decoration: none; font-weight: 500; }
+  .meta a:hover { text-decoration: underline; }
+  .meta .sub { color: var(--muted); }
+  .meta ul { margin: 6px 0 0; padding: 0; list-style: none; }
+  .meta li { color: var(--flag); }
+  .meta li.good { color: var(--ok); }
+  .meta li.err { color: var(--danger); }
+
+  .actions { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); display: none; gap: 10px;
+    align-items: center; background: var(--ink); color: var(--page); padding: 10px 12px 10px 22px; border-radius: 999px;
+    box-shadow: 0 8px 30px rgba(28, 58, 44, .25); max-width: calc(100vw - 24px); white-space: nowrap; }
+  @media (max-width: 900px) { .actions { flex-wrap: wrap; white-space: normal; border-radius: 16px; } }
+  .actions.on { display: flex; }
+  .actions .btn { border-color: var(--page); color: var(--page); }
+  .actions .btn.solid { background: var(--page); color: var(--ink); }
+  .actions .btn.warn { border-color: var(--flag); color: var(--white); }
+  .toast { position: fixed; top: 20px; right: 20px; background: var(--ink); color: var(--page); padding: 12px 18px;
+    border-radius: 6px; display: none; max-width: 360px; z-index: 10; }
+  .toast.err { background: var(--danger); }
+
+  @media (max-width: 640px) {
+    header, nav.tools, .filters, main { padding-left: 16px; padding-right: 16px; }
+    .panel { margin-left: 16px; margin-right: 16px; }
+    .grid { grid-template-columns: repeat(2, 1fr); }
+  }
+  @media (prefers-reduced-motion: reduce) { .bar i { transition: none; } }
+</style>
+</head>
+<body class="showbox">
+<header>
+  <h1>Grid check</h1>
+  <div id="job">No job running</div>
+</header>
+
+<nav class="tools">
+  <button class="btn" data-panel="scan" aria-expanded="false">Scan catalog</button>
+  <button class="btn" data-panel="feed" aria-expanded="false">Fix specific products</button>
+  <button class="btn" data-panel="settings" aria-expanded="false">Size standard</button>
+</nav>
+
+<section class="panel" id="scan" hidden>
+  <p>Checks the first and second image of every matching product against the size standard. Nothing changes in Shopify. Leave everything empty to scan all active products.</p>
+  <div class="fields">
+    <label>Product type<input type="text" id="s-type" placeholder="Jackets"></label>
+    <label>Vendor<input type="text" id="s-vendor" placeholder="Malbon Golf"></label>
+    <label>Tag<input type="text" id="s-tag"></label>
+    <label>Collection handle<input type="text" id="s-coll" placeholder="new-arrivals"></label>
+  </div>
+  <div class="row">
+    <label class="check"><input type="checkbox" id="s-drafts"> Include drafts</label>
+    <span class="spacer"></span>
+    <button class="btn solid" id="do-scan">Scan catalog</button>
+  </div>
+</section>
+
+<section class="panel" id="feed" hidden>
+  <p>Paste product links, handles or IDs, one per line. Their first and second images are checked and anything off grid is selected for you.</p>
+  <textarea id="f-refs" placeholder="https://bisquegolf.com/products/malbon-golf-cloudburst-rain-jacket-black"></textarea>
+  <div class="row"><span class="spacer"></span><button class="btn solid" id="do-feed">Load products</button></div>
+</section>
+
+<section class="panel" id="settings" hidden>
+  <p>Every check and every conversion uses these values. The product is scaled until it touches the fit box, then centred on the canvas.</p>
+  <div class="fields">
+    <label>Canvas width (px)<input type="number" id="c-canvas_w"></label>
+    <label>Canvas height (px)<input type="number" id="c-canvas_h"></label>
+    <label>Fit box width (px)<input type="number" id="c-box_w"></label>
+    <label>Fit box height (px)<input type="number" id="c-box_h"></label>
+    <label>Size tolerance (0.04 = 4%)<input type="number" step="0.01" id="c-scale_tol"></label>
+    <label>Centre tolerance (0.02 = 2%)<input type="number" step="0.01" id="c-center_tol"></label>
+    <label>Card width in shop grid<input type="number" id="c-card_ratio_w"></label>
+    <label>Card height in shop grid<input type="number" id="c-card_ratio_h"></label>
+    <label>Card colour<input type="text" id="c-card_bg"></label>
+    <label>Skip product types (comma separated)<input type="text" id="c-excluded_types"></label>
+  </div>
+  <div class="row">
+    <span class="hint" id="margins"></span>
+    <span class="spacer"></span>
+    <a class="btn" href="/api/backups.zip">Download originals</a>
+    <button class="btn solid" id="do-settings">Save standard</button>
+  </div>
+</section>
+
+<div class="filters" id="filters"></div>
+
+<main>
+  <div class="grid" id="grid"></div>
+</main>
+
+<div class="actions" id="actions">
+  <span id="sel-count"></span>
+  <button class="btn" id="sel-all">Select all shown</button>
+  <button class="btn" id="sel-none">Clear</button>
+  <button class="btn solid" id="do-convert">Convert</button>
+  <button class="btn warn" id="do-replace">Replace in Shopify</button>
+  <button class="btn" id="do-restore">Restore original</button>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+const S = { images: [], settings: null, filter: "off", lastJob: null, after: new Set() };
+
+const FILTERS = [
+  ["off", "Off grid", i => i.status === "off" && i.stage === "scanned"],
+  ["converted", "Ready to replace", i => i.stage === "converted"],
+  ["replaced", "Replaced", i => i.stage === "replaced" || i.stage === "restored"],
+  ["failed", "Failed", i => i.stage === "failed" || i.status === "error"],
+  ["ok", "On grid", i => i.status === "ok" && i.stage === "scanned"],
+  ["skip", "Skipped", i => i.status === "skip" && i.stage === "scanned"],
+  ["all", "All", () => true],
+];
+
+const $ = id => document.getElementById(id);
+const num = gid => gid.split("/").pop();
+const sized = (u, w) => u + (u.includes("?") ? "&" : "?") + "width=" + w;
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+async function api(path, opts = {}) {
+  const r = await fetch(path, { headers: { "Content-Type": "application/json" }, ...opts });
+  const body = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(body.detail || `Request failed (${r.status})`);
+  return body;
+}
+function toast(msg, err) {
+  const t = $("toast"); t.textContent = msg; t.className = "toast" + (err ? " err" : ""); t.style.display = "block";
+  clearTimeout(t._h); t._h = setTimeout(() => t.style.display = "none", 4500);
+}
+
+/* panels */
+document.querySelectorAll("[data-panel]").forEach(b => b.onclick = () => {
+  const open = b.getAttribute("aria-expanded") !== "true";
+  document.querySelectorAll("[data-panel]").forEach(o => { o.setAttribute("aria-expanded", "false"); $(o.dataset.panel).hidden = true; });
+  b.setAttribute("aria-expanded", open); $(b.dataset.panel).hidden = !open;
+});
+
+/* settings */
+const SET_KEYS = ["canvas_w", "canvas_h", "box_w", "box_h", "scale_tol", "center_tol", "card_ratio_w", "card_ratio_h", "card_bg", "excluded_types"];
+function fillSettings() {
+  for (const k of SET_KEYS) {
+    const v = S.settings[k];
+    $("c-" + k).value = Array.isArray(v) ? v.join(", ") : v;
+  }
+  const s = S.settings;
+  $("margins").textContent = `Margins: ${(s.canvas_w - s.box_w) / 2} px left and right, ${(s.canvas_h - s.box_h) / 2} px top and bottom.`;
+}
+$("do-settings").onclick = async () => {
+  const body = {};
+  for (const k of SET_KEYS) body[k] = $("c-" + k).value;
+  body.excluded_types = body.excluded_types.split(",").map(x => x.trim()).filter(Boolean);
+  try {
+    S.settings = await api("/api/settings", { method: "PUT", body: JSON.stringify(body) });
+    fillSettings(); render();
+    toast("Standard saved. Scan again to recheck images against it.");
+  } catch (e) { toast(e.message, true); }
+};
+
+/* jobs */
+async function startJob(path, body, label) {
+  try { await api(path, { method: "POST", body: JSON.stringify(body) }); toast(label); pollJobs(); }
+  catch (e) { toast(e.message, true); }
+}
+$("do-scan").onclick = () => startJob("/api/scan", {
+  product_type: $("s-type").value, vendor: $("s-vendor").value, tag: $("s-tag").value,
+  collection: $("s-coll").value, include_drafts: $("s-drafts").checked }, "Scan started");
+$("do-feed").onclick = () => startJob("/api/feed", { refs: $("f-refs").value }, "Loading products");
+
+const KIND = { scan: "Scanning catalog", feed: "Loading products", convert: "Converting", replace: "Replacing in Shopify", restore: "Restoring originals" };
+const DONE = { scan: "Scan finished", feed: "Products loaded", convert: "Conversion finished", replace: "Replaced in Shopify", restore: "Originals restored" };
+async function pollJobs() {
+  const jobs = await api("/api/jobs").catch(() => []);
+  const j = jobs[0];
+  if (!j) return;
+  const running = j.status === "running" || j.status === "queued";
+  const pct = j.total ? Math.round(j.done / j.total * 100) : 0;
+  let text;
+  if (running) text = `<b>${KIND[j.kind]}</b> ${j.done} of ${j.total || "?"}${j.failed ? `, ${j.failed} failed` : ""}. ${esc(j.message || "")}`;
+  else if (j.status === "failed") text = `<b>${KIND[j.kind]} stopped:</b> ${esc(j.message)}`;
+  else if (j.status === "interrupted") text = `<b>${KIND[j.kind]} was interrupted</b> by a restart. Start it again.`;
+  else text = `<b>${DONE[j.kind]}</b>: ${j.done} done${j.failed ? `, ${j.failed} failed (see the Failed filter)` : ""}.`;
+  $("job").innerHTML = text + (running ? `<div class="bar"><i style="width:${pct}%"></i></div>` : "");
+  const key = j.id + j.status + j.done;
+  if (key !== S.lastJob) { S.lastJob = key; await loadImages(); }
+  if (running) setTimeout(pollJobs, 2000);
+}
+
+/* images */
+async function loadImages() { S.images = await api("/api/images"); render(); }
+
+function render() {
+  const f = $("filters");
+  f.innerHTML = FILTERS.map(([key, label, fn]) =>
+    `<button class="filter" aria-pressed="${S.filter === key}" data-f="${key}">${label}<span class="n">${S.images.filter(fn).length}</span></button>`
+  ).join("") + `<span class="spacer"></span><label class="check toggle"><input type="checkbox" id="boxtoggle" ${document.body.classList.contains("showbox") ? "checked" : ""}> Show fit box</label>`;
+  f.querySelectorAll("[data-f]").forEach(b => b.onclick = () => { S.filter = b.dataset.f; render(); });
+  $("boxtoggle").onchange = e => document.body.classList.toggle("showbox", e.target.checked);
+
+  const fn = FILTERS.find(x => x[0] === S.filter)[2];
+  const list = S.images.filter(fn);
+  const g = $("grid");
+  if (!list.length) {
+    g.innerHTML = S.images.length
+      ? `<div class="empty"><strong>Nothing here.</strong>Pick another filter above.</div>`
+      : `<div class="empty"><strong>No images checked yet.</strong>Scan the catalog to find images that don't fit the grid, or paste specific products under Fix specific products.</div>`;
+  } else g.innerHTML = list.map(card).join("");
+  layoutCanvases();
+  g.querySelectorAll(".item").forEach(el => {
+    const id = el.dataset.id;
+    el.querySelector(".pick").onchange = e => setSel([id], e.target.checked);
+    el.querySelector(".frame").onclick = e => { if (e.target.closest(".flip")) return; setSel([id], !imgById(id).selected); };
+    const flip = el.querySelector(".flip");
+    if (flip) flip.onclick = () => { S.after.has(id) ? S.after.delete(id) : S.after.add(id); render(); };
+  });
+  updateActions();
+}
+const imgById = id => S.images.find(i => i.media_id === id);
+
+function card(i) {
+  const s = S.settings, id = i.media_id;
+  const converted = i.stage === "converted";
+  const showAfter = converted && !S.after.has(id);
+  const src = showAfter ? `/files/previews/${num(id)}.png?v=${Math.round(i.updated)}` : sized(i.url, 600);
+  let badge = "";
+  if (i.stage === "replaced") badge = `<span class="badge okb">Replaced</span>`;
+  else if (i.stage === "restored") badge = `<span class="badge muted">Original</span>`;
+  else if (converted) badge = `<span class="badge okb">${showAfter ? "After" : "Before"}</span>`;
+  else if (i.status === "off") badge = `<span class="badge">Off grid</span>`;
+  else if (i.status === "skip") badge = `<span class="badge muted">Skipped</span>`;
+
+  let notes = [];
+  if (converted && showAfter && i.after) {
+    notes = i.after.reasons.length ? i.after.reasons.map(r => `<li>${esc(r)}</li>`) : [`<li class="good">Fits the grid</li>`];
+    (i.warnings || []).forEach(w => notes.push(`<li>${esc(w)}</li>`));
+  } else {
+    notes = (i.reasons || []).map(r => `<li>${esc(r)}</li>`);
+    if (i.status === "ok") notes.push(`<li class="good">Fits the grid</li>`);
+  }
+  if (i.error) notes.push(`<li class="err">${esc(i.error)}</li>`);
+  const admin = s.store ? `https://${s.store}/admin/products/${i.product_id}` : "#";
+  const pos = i.position === 1 ? "First image" : i.position === 2 ? "Second image" : `Image ${i.position}`;
+
+  return `<div class="item ${i.selected ? "selected" : ""}" data-id="${esc(id)}">
+    <div class="frame" style="aspect-ratio:${s.card_ratio_w}/${s.card_ratio_h}">
+      <input type="checkbox" class="pick" aria-label="Select ${esc(i.title)}, ${pos}" ${i.selected ? "checked" : ""}>
+      ${badge}
+      <img src="${esc(src)}" alt="" loading="lazy" onerror="this.classList.add('broken')">
+      <div class="canvas" data-ratio="${s.canvas_w / s.canvas_h}">
+        <div class="fitbox" style="left:${(s.canvas_w - s.box_w) / 2 / s.canvas_w * 100}%;top:${(s.canvas_h - s.box_h) / 2 / s.canvas_h * 100}%;width:${s.box_w / s.canvas_w * 100}%;height:${s.box_h / s.canvas_h * 100}%"></div>
+      </div>
+      ${converted ? `<button class="flip">${showAfter ? "Show before" : "Show after"}</button>` : ""}
+    </div>
+    <div class="meta">
+      <a href="${admin}" target="_blank" rel="noopener">${esc(i.title)}</a>
+      <div class="sub">${pos}${i.vendor ? ", " + esc(i.vendor) : ""}</div>
+      <ul>${notes.join("")}</ul>
+    </div>
+  </div>`;
+}
+
+/* the fit box is drawn on the standard canvas, shown "contain" inside the card */
+function layoutCanvases() {
+  document.querySelectorAll(".canvas").forEach(c => {
+    const fr = c.parentElement, W = fr.clientWidth, H = fr.clientHeight, r = +c.dataset.ratio;
+    let w = W, h = W / r; if (h > H) { h = H; w = H * r; }
+    c.style.width = w + "px"; c.style.height = h + "px";
+  });
+}
+window.addEventListener("resize", layoutCanvases);
+
+/* selection */
+async function setSel(ids, val) {
+  ids.forEach(id => { const i = imgById(id); if (i) i.selected = val ? 1 : 0; });
+  render();
+  api("/api/select", { method: "POST", body: JSON.stringify({ ids, selected: val }) }).catch(e => toast(e.message, true));
+}
+function selected() { return S.images.filter(i => i.selected); }
+function updateActions() {
+  const sel = selected(), n = sel.length;
+  $("actions").classList.toggle("on", n > 0);
+  $("sel-count").textContent = `${n} selected`;
+  const conv = sel.filter(i => i.stage === "converted").length;
+  $("do-replace").disabled = !conv;
+  $("do-replace").textContent = conv ? `Replace ${conv} in Shopify` : "Replace in Shopify";
+  $("do-restore").disabled = !sel.some(i => i.backup_path);
+}
+$("sel-all").onclick = () => setSel(S.images.filter(FILTERS.find(x => x[0] === S.filter)[2]).map(i => i.media_id), true);
+$("sel-none").onclick = () => setSel(selected().map(i => i.media_id), false);
+$("do-convert").onclick = () => {
+  const ids = selected().map(i => i.media_id);
+  const photos = selected().filter(i => i.category === "photo").length;
+  if (photos && !confirm(`${photos} of these are model or lifestyle shots. Cutting those out rarely works well. Convert anyway?`)) return;
+  startJob("/api/convert", { ids }, `Converting ${ids.length} images. Nothing changes in Shopify yet.`);
+  S.filter = "converted";
+};
+$("do-replace").onclick = () => {
+  const ids = selected().filter(i => i.stage === "converted").map(i => i.media_id);
+  if (!confirm(`Replace ${ids.length} images in Shopify? The originals are downloaded as a backup first and can be restored.`)) return;
+  startJob("/api/replace", { ids }, `Replacing ${ids.length} images`);
+};
+$("do-restore").onclick = () => {
+  const ids = selected().filter(i => i.backup_path).map(i => i.media_id);
+  if (!confirm(`Put the original image back in Shopify for ${ids.length} images?`)) return;
+  startJob("/api/restore", { ids }, `Restoring ${ids.length} originals`);
+};
+
+(async () => {
+  S.settings = await api("/api/settings");
+  fillSettings();
+  await loadImages();
+  pollJobs();
+})();
+</script>
+</body>
+</html>
