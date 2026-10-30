@@ -6,3 +6,4 @@ numpy==2.2.1
 scipy==1.15.1
 rembg==2.0.61
 onnxruntime==1.20.1
+opencv-python-headless==4.10.0.84

@@ -81,11 +81,52 @@ def _plain_mask(rgb, bg, thresh=40):
     return ndimage.binary_opening(diff > thresh, iterations=2)
 
 
-def analyze(data: bytes, spec: dict, orig_w: int = None, orig_h: int = None) -> dict:
-    """Classify an image and check it against the grid standard."""
+_FACES = None
+
+
+def _faces(im: Image.Image) -> int:
+    """Count frontal or profile faces. Used to recognise model shots."""
+    global _FACES
+    import cv2
+    if _FACES is None:
+        _FACES = [cv2.CascadeClassifier(cv2.data.haarcascades + n)
+                  for n in ("haarcascade_frontalface_default.xml", "haarcascade_profileface.xml")]
+    g = im.convert("L")
+    g.thumbnail((900, 900))
+    arr = np.asarray(g)
+    side = int(min(arr.shape) * 0.06)
+    return sum(len(c.detectMultiScale(arr, scaleFactor=1.1, minNeighbors=6, minSize=(side, side))) for c in _FACES)
+
+
+def _model_reason(im, mask, box):
+    """A model shot shows a face, or a body cut off by the top or bottom edge.
+    Flatlays and packshots float free of those edges."""
+    h, w = mask.shape
+    x0, y0, x1, y1 = box
+    if _faces(im):
+        return "Model shot (face found)"
+    band = max(1, int(h * 0.005))
+    top = mask[:band].any(0).mean()
+    bottom = mask[-band:].any(0).mean()
+    if bottom > 0.12 or top > 0.08:
+        return "Model shot (body cut off at the edge)"
+    return None
+
+
+def photo_result(reason, W, H):
+    return {"category": "photo", "status": "skip", "reasons": [reason], "metrics": {"w": W, "h": H}}
+
+
+def analyze(data: bytes, spec: dict, orig_w: int = None, orig_h: int = None, force: str = None) -> dict:
+    """Classify an image and check it against the grid standard.
+
+    force="photo" marks it as a model shot; force="flatlay" skips model detection.
+    """
     im = load(data)
     w, h = im.size
     W, H = orig_w or w, orig_h or h
+    if force == "photo":
+        return photo_result("Marked as model shot", W, H)
     if has_alpha(im):
         a = np.asarray(im.convert("RGBA"))[:, :, 3]
         mask = ndimage.binary_opening(a > 8, iterations=1)
@@ -93,9 +134,8 @@ def analyze(data: bytes, spec: dict, orig_w: int = None, orig_h: int = None) -> 
     else:
         rgb = np.asarray(im.convert("RGB"))
         bg, uniform = border_stats(rgb)
-        if uniform < spec["uniform_min"]:
-            return {"category": "photo", "status": "skip",
-                    "reasons": ["Model or lifestyle shot (background is not plain)"], "metrics": {"w": W, "h": H}}
+        if uniform < spec["uniform_min"] and force != "flatlay":
+            return photo_result("Model or lifestyle shot (background is not plain)", W, H)
         mask = _plain_mask(rgb, bg)
         category = "plain"
 
@@ -107,10 +147,16 @@ def analyze(data: bytes, spec: dict, orig_w: int = None, orig_h: int = None) -> 
     if touches >= 3:
         return {"category": "detail", "status": "skip",
                 "reasons": ["Detail shot (fills the frame)"], "metrics": {"w": W, "h": H}}
+    if force != "flatlay":
+        reason = _model_reason(im, mask, box)
+        if reason:
+            return photo_result(reason, W, H)
 
-    cw, ch, bw, bh = spec["canvas_w"], spec["canvas_h"], spec["box_w"], spec["box_h"]
+    cw, ch, bh = spec["canvas_w"], spec["canvas_h"], spec["box_h"]
     pw, ph = (x1 - x0) / w, (y1 - y0) / h          # product size as share of image
-    fill = max(pw / (bw / cw), ph / (bh / ch))      # 1.0 = touches the fit box
+    aspect = ((x1 - x0) * W / w) / max(1, (y1 - y0) * H / h)   # real width / height of the product
+    target_h = min(bh, width_limit(spec) / aspect)  # height the product should have on the standard canvas
+    fill = (ph * ch) / target_h                     # 1.0 = exactly the standard height
     dx, dy = (x0 + x1) / 2 / w - 0.5, (y0 + y1) / 2 / h - 0.5
 
     reasons = []
@@ -118,11 +164,12 @@ def analyze(data: bytes, spec: dict, orig_w: int = None, orig_h: int = None) -> 
         reasons.append(f"Canvas {W}×{H}, standard is {cw}×{ch}")
     elif W < cw * 0.6:
         reasons.append(f"Low resolution ({W}×{H})")
+    size_word = "height" if spec.get("fit_mode") == "height" else "size"
     tol = spec["scale_tol"]
     if fill < 1 - tol:
-        reasons.append(f"Product too small ({fill:.0%} of fit box)")
+        reasons.append(f"Product too small ({fill:.0%} of standard {size_word})")
     elif fill > 1 + tol:
-        reasons.append(f"Product too large ({fill:.0%} of fit box)")
+        reasons.append(f"Product too large ({fill:.0%} of standard {size_word})")
     if abs(dx) > spec["center_tol"]:
         reasons.append("Not centred horizontally")
     if abs(dy) > spec["center_tol"]:
@@ -137,6 +184,14 @@ def analyze(data: bytes, spec: dict, orig_w: int = None, orig_h: int = None) -> 
         "metrics": {"w": W, "h": H, "fill": round(fill, 3), "dx": round(dx, 3), "dy": round(dy, 3),
                     "pw": round(pw, 3), "ph": round(ph, 3)},
     }
+
+
+def width_limit(spec):
+    """Widest a product may be. Height mode lets width vary up to max_w,
+    fit-box mode keeps it inside the fit box."""
+    if spec.get("fit_mode") == "height":
+        return spec.get("max_w") or spec["canvas_w"]
+    return spec["box_w"]
 
 
 def cutout(im: Image.Image) -> Image.Image:
@@ -199,8 +254,11 @@ def fit(rgba: Image.Image, spec: dict):
         raise ValueError("Image is fully transparent")
     prod = rgba.crop(box)
     pw, ph = prod.size
-    cw, ch, bw, bh = spec["canvas_w"], spec["canvas_h"], spec["box_w"], spec["box_h"]
-    scale = min(bw / pw, bh / ph)
+    cw, ch, bh = spec["canvas_w"], spec["canvas_h"], spec["box_h"]
+    limit = width_limit(spec)
+    scale = min(limit / pw, bh / ph)
+    if spec.get("fit_mode") == "height" and limit / pw < bh / ph:
+        warnings.append("Very wide product: limited by max width, so it is shorter than the standard height")
     if scale > 1.15:
         warnings.append(f"Upscaled {scale:.0%}: source is small, check sharpness")
     size = (max(1, round(pw * scale)), max(1, round(ph * scale)))

@@ -46,7 +46,7 @@
   .panel p { margin: 0 0 14px; color: var(--muted); max-width: 64ch; }
   .fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px 16px; }
   label { display: grid; gap: 4px; font-size: 13px; color: var(--muted); }
-  input[type=text], input[type=number], textarea { border: 1px solid var(--line); border-radius: 4px;
+  input[type=text], input[type=number], textarea, select { border: 1px solid var(--line); border-radius: 4px;
     padding: 8px 10px; background: var(--page); color: var(--ink); width: 100%; }
   textarea { min-height: 110px; resize: vertical; }
   .row { display: flex; gap: 12px; align-items: center; margin-top: 16px; flex-wrap: wrap; }
@@ -58,6 +58,8 @@
   #job { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
   #job .stop { padding: 5px 14px; font-size: 13px; border-color: var(--danger); color: var(--danger); }
   #job .jobtext { min-width: 220px; }
+  .mark { margin-top: 6px; font-size: 12px; color: var(--muted); background: none; border: 0; padding: 0;
+    cursor: pointer; text-decoration: underline; }
   .reset { font-size: 14px; color: var(--muted); background: none; border: 0; cursor: pointer; text-decoration: underline; padding: 6px 4px; margin-left: 12px; }
 
   .filters { display: flex; gap: 4px; padding: 28px 40px 0; flex-wrap: wrap; align-items: center; }
@@ -79,6 +81,7 @@
   .canvas { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); pointer-events: none; }
   .fitbox { position: absolute; outline: 1.5px dashed var(--flag); display: none; }
   body.showbox .fitbox { display: block; }
+  .fitbox.lines { outline: 0; border-top: 2px dashed var(--flag); border-bottom: 2px dashed var(--flag); }
   .item.selected .frame { box-shadow: inset 0 0 0 3px var(--ink); }
   .pick { position: absolute; top: 10px; left: 10px; width: 20px; height: 20px; accent-color: var(--ink); z-index: 2; }
   .badge { position: absolute; top: 10px; right: 10px; background: var(--flag); color: var(--white); font-size: 12px;
@@ -130,6 +133,7 @@
 
 <section class="panel" id="scan" hidden>
   <p>Checks the chosen images of every matching product against the size standard. Nothing changes in Shopify. Leave the filters empty to scan everything.</p>
+  <p class="hint" id="mode-note"></p>
   <div class="fields">
     <label>Product type<input type="text" id="s-type" placeholder="Jackets"></label>
     <label>Vendor<input type="text" id="s-vendor" placeholder="Malbon Golf"></label>
@@ -162,12 +166,14 @@
 </section>
 
 <section class="panel" id="settings" hidden>
-  <p>Every check and every conversion uses these values. The product is scaled until it touches the fit box, then centred on the canvas.</p>
+  <p>Every check and every conversion uses these values. Height mode gives every product the same height and lets the width vary, which keeps grid rows level. Fit box mode scales each product until it touches the box, so wide items end up shorter.</p>
   <div class="fields">
+    <label>Size by<select id="c-fit_mode"><option value="height">Height (width may vary)</option><option value="box">Fit box (height and width)</option></select></label>
+    <label>Max width in height mode (px)<input type="number" id="c-max_w"></label>
     <label>Canvas width (px)<input type="number" id="c-canvas_w"></label>
     <label>Canvas height (px)<input type="number" id="c-canvas_h"></label>
     <label>Fit box width (px)<input type="number" id="c-box_w"></label>
-    <label>Fit box height (px)<input type="number" id="c-box_h"></label>
+    <label>Product height / fit box height (px)<input type="number" id="c-box_h"></label>
     <label>Size tolerance (0.04 = 4%)<input type="number" step="0.01" id="c-scale_tol"></label>
     <label>Centre tolerance (0.02 = 2%)<input type="number" step="0.01" id="c-center_tol"></label>
     <label>Card width in shop grid<input type="number" id="c-card_ratio_w"></label>
@@ -208,8 +214,9 @@ const FILTERS = [
   ["replaced", "Replaced", i => i.stage === "replaced" || i.stage === "restored"],
   ["failed", "Failed", i => i.stage === "failed" || i.status === "error"],
   ["ok", "On grid", i => i.status === "ok" && i.stage === "scanned"],
-  ["skip", "Skipped", i => i.status === "skip" && i.stage === "scanned"],
-  ["all", "All", () => true],
+  ["photo", "Model shots", i => i.category === "photo"],
+  ["skip", "Other skipped", i => i.status === "skip" && i.category !== "photo" && i.stage === "scanned"],
+  ["all", "All flatlays", i => i.category !== "photo"],
 ];
 
 const $ = id => document.getElementById(id);
@@ -236,14 +243,19 @@ document.querySelectorAll("[data-panel]").forEach(b => b.onclick = () => {
 });
 
 /* settings */
-const SET_KEYS = ["canvas_w", "canvas_h", "box_w", "box_h", "scale_tol", "center_tol", "card_ratio_w", "card_ratio_h", "card_bg", "excluded_types"];
+const SET_KEYS = ["fit_mode", "max_w", "canvas_w", "canvas_h", "box_w", "box_h", "scale_tol", "center_tol", "card_ratio_w", "card_ratio_h", "card_bg", "excluded_types"];
 function fillSettings() {
   for (const k of SET_KEYS) {
     const v = S.settings[k];
     $("c-" + k).value = Array.isArray(v) ? v.join(", ") : v;
   }
   const s = S.settings;
-  $("margins").textContent = `Margins: ${(s.canvas_w - s.box_w) / 2} px left and right, ${(s.canvas_h - s.box_h) / 2} px top and bottom.`;
+  $("margins").textContent = s.fit_mode === "height"
+    ? `Every product ${s.box_h} px tall (${Math.round(s.box_h / s.canvas_h * 100)}% of the canvas), ${(s.canvas_h - s.box_h) / 2} px above and below, at most ${s.max_w} px wide.`
+    : `Margins: ${(s.canvas_w - s.box_w) / 2} px left and right, ${(s.canvas_h - s.box_h) / 2} px top and bottom.`;
+  $("mode-note").textContent = s.fit_mode === "height"
+    ? `Checking by height: every product should be ${s.box_h} px tall on a ${s.canvas_w} × ${s.canvas_h} canvas.`
+    : `Checking by fit box: ${s.box_w} × ${s.box_h} px on a ${s.canvas_w} × ${s.canvas_h} canvas.`;
 }
 $("do-settings").onclick = async () => {
   const body = {};
@@ -271,8 +283,8 @@ $("do-scan").onclick = () => {
 };
 $("do-feed").onclick = () => startJob("/api/feed", { refs: $("f-refs").value }, "Loading products");
 
-const KIND = { scan: "Scanning catalog", feed: "Loading products", convert: "Converting", replace: "Replacing in Shopify", restore: "Restoring originals" };
-const DONE = { scan: "Scan finished", feed: "Products loaded", convert: "Conversion finished", replace: "Replaced in Shopify", restore: "Originals restored" };
+const KIND = { mark: "Rechecking", scan: "Scanning catalog", feed: "Loading products", convert: "Converting", replace: "Replacing in Shopify", restore: "Restoring originals" };
+const DONE = { mark: "Recheck finished", scan: "Scan finished", feed: "Products loaded", convert: "Conversion finished", replace: "Replaced in Shopify", restore: "Originals restored" };
 async function pollJobs() {
   const jobs = await api("/api/jobs").catch(() => []);
   const j = jobs[0];
@@ -304,7 +316,7 @@ function render() {
   const f = $("filters");
   f.innerHTML = FILTERS.map(([key, label, fn]) =>
     `<button class="filter" aria-pressed="${S.filter === key}" data-f="${key}">${label}<span class="n">${S.images.filter(fn).length}</span></button>`
-  ).join("") + (S.images.length ? `<button class="reset" id="reset">Reset list</button>` : "") + `<span class="spacer"></span><label class="check toggle"><input type="checkbox" id="boxtoggle" ${document.body.classList.contains("showbox") ? "checked" : ""}> Show fit box</label>`;
+  ).join("") + (S.images.length ? `<button class="reset" id="reset">Reset list</button>` : "") + `<span class="spacer"></span><label class="check toggle"><input type="checkbox" id="boxtoggle" ${document.body.classList.contains("showbox") ? "checked" : ""}> Show ${S.settings.fit_mode === "height" ? "height lines" : "fit box"}</label>`;
   f.querySelectorAll("[data-f]").forEach(b => b.onclick = () => { S.filter = b.dataset.f; render(); });
   $("boxtoggle").onchange = e => document.body.classList.toggle("showbox", e.target.checked);
   if ($("reset")) $("reset").onclick = async () => {
@@ -327,6 +339,9 @@ function render() {
     const id = el.dataset.id;
     el.querySelector(".pick").onchange = e => setSel([id], e.target.checked);
     el.querySelector(".frame").onclick = e => { if (e.target.closest(".flip")) return; setSel([id], !imgById(id).selected); };
+    const mk = el.querySelector(".mark");
+    if (mk) mk.onclick = () => startJob("/api/mark", { ids: [id], kind: mk.dataset.kind },
+      mk.dataset.kind === "photo" ? "Moved to Model shots" : "Rechecking as a flatlay");
     const flip = el.querySelector(".flip");
     if (flip) flip.onclick = () => { S.after.has(id) ? S.after.delete(id) : S.after.add(id); render(); };
   });
@@ -346,6 +361,9 @@ function card(i) {
   else if (i.status === "off") badge = `<span class="badge">Off grid</span>`;
   else if (i.status === "skip") badge = `<span class="badge muted">Skipped</span>`;
 
+  const markBtn = i.stage !== "scanned" ? "" : i.category === "photo"
+    ? `<button class="mark" data-kind="flatlay">Not a model shot</button>`
+    : ["plain", "cutout"].includes(i.category) ? `<button class="mark" data-kind="photo">Model shot</button>` : "";
   let notes = [];
   if (converted && showAfter && i.after) {
     notes = i.after.reasons.length ? i.after.reasons.map(r => `<li>${esc(r)}</li>`) : [`<li class="good">Fits the grid</li>`];
@@ -364,7 +382,7 @@ function card(i) {
       ${badge}
       <img src="${esc(src)}" alt="" loading="lazy" onerror="this.classList.add('broken')">
       <div class="canvas" data-ratio="${s.canvas_w / s.canvas_h}">
-        <div class="fitbox" style="left:${(s.canvas_w - s.box_w) / 2 / s.canvas_w * 100}%;top:${(s.canvas_h - s.box_h) / 2 / s.canvas_h * 100}%;width:${s.box_w / s.canvas_w * 100}%;height:${s.box_h / s.canvas_h * 100}%"></div>
+        ${guide(s)}
       </div>
       ${converted ? `<button class="flip">${showAfter ? "Show before" : "Show after"}</button>` : ""}
     </div>
@@ -372,8 +390,19 @@ function card(i) {
       <a href="${admin}" target="_blank" rel="noopener">${esc(i.title)}</a>
       <div class="sub">${pos}${i.vendor ? ", " + esc(i.vendor) : ""}</div>
       <ul>${notes.join("")}</ul>
+      ${markBtn}
     </div>
   </div>`;
+}
+
+function guide(s) {
+  const top = (s.canvas_h - s.box_h) / 2 / s.canvas_h * 100, h = s.box_h / s.canvas_h * 100;
+  if (s.fit_mode === "height") {
+    const w = s.max_w / s.canvas_w * 100;
+    return `<div class="fitbox lines" style="left:${(100 - w) / 2}%;width:${w}%;top:${top}%;height:${h}%"></div>`;
+  }
+  const w = s.box_w / s.canvas_w * 100;
+  return `<div class="fitbox" style="left:${(100 - w) / 2}%;width:${w}%;top:${top}%;height:${h}%"></div>`;
 }
 
 /* the fit box is drawn on the standard canvas, shown "contain" inside the card */

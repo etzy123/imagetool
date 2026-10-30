@@ -11,7 +11,7 @@ Finds product images that don't fit the collection grid, lets you review them, a
 5. **Replace in Shopify**: backs up the original, uploads the new file and swaps it in place. Gallery position, alt text and variant links stay intact. The result is re-checked on the live image.
 6. **Restore original**: puts the backed-up original back.
 
-Skipped automatically: product types in the skip list (default `Footwear`), model and lifestyle shots, and detail shots that fill the frame.
+Skipped automatically: product types in the skip list (default `Footwear`), detail shots that fill the frame, and model or lifestyle shots. A model shot is recognised by a busy background, a face, or a body cut off by the top or bottom edge. Model shots never appear in the flatlay views; they have their own **Model shots** filter. If the app gets one wrong, use **Model shot** or **Not a model shot** under the image; that choice is kept on every later scan.
 
 ## Deploy on Railway
 
@@ -30,7 +30,9 @@ Required Admin API scopes: `read_products`, `write_products`, `read_files`, `wri
 
 ## Size standard
 
-Defaults follow the Notion page "Richtlijnen productfotografie": canvas 2000 × 2000, fit box 1256 × 1256. Change them under **Size standard** in the app, then scan again. All checks and conversions use the saved values.
+**Size by height** (default): every product gets the same height (the fit box height) and the width may vary up to the max width. This keeps grid rows level. **Size by fit box**: each product is scaled until it touches the box, so wide items end up shorter.
+
+Canvas and height follow the Notion page "Richtlijnen productfotografie": canvas 2000 × 2000, product height 1256 px. Max width defaults to 1800 px. Change them under **Size standard** in the app, then scan again. All checks and conversions use the saved values.
 
 ## Notes
 

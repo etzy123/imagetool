@@ -134,7 +134,7 @@ def analyze_product(prod, spec, positions=None):
         else:
             try:
                 data = download(sized_url(img["url"], 1200))
-                res = imaging.analyze(data, spec, img["width"], img["height"])
+                res = imaging.analyze(data, spec, img["width"], img["height"], force=db.get_override(m["id"]))
             except Exception as e:
                 errors += 1
                 res = {"category": "error", "status": "error", "reasons": [f"Could not check image: {e}"], "metrics": {}}
@@ -282,7 +282,29 @@ def job_restore(jid, p):
         db.update_job(jid, done=done, failed=failed, message=row["title"])
 
 
-HANDLERS = {"scan": job_scan, "feed": job_feed, "convert": job_convert,
+def job_mark(jid, p):
+    """Correct the model-shot detection for specific images and recheck them."""
+    spec, kind = db.get_settings(), p["kind"]
+    ids = p["ids"]
+    db.update_job(jid, total=len(ids))
+    done = failed = 0
+    for mid in ids:
+        check_stop(jid)
+        row = db.get_image(mid)
+        try:
+            db.update_image(mid, override=kind)
+            data = download(sized_url(row["url"], 1200))
+            res = imaging.analyze(data, spec, row["width"], row["height"], force=kind)
+            db.update_image(mid, category=res["category"], status=res["status"], reasons=res["reasons"],
+                            metrics=res["metrics"], stage="scanned", selected=0, error=None)
+        except Exception as e:
+            failed += 1
+            db.update_image(mid, error=f"Recheck: {e}"[:400])
+        done += 1
+        db.update_job(jid, done=done, failed=failed, message=row["title"])
+
+
+HANDLERS = {"mark": job_mark, "scan": job_scan, "feed": job_feed, "convert": job_convert,
             "replace": job_replace, "restore": job_restore}
 
 
@@ -311,15 +333,17 @@ def get_settings():
 async def put_settings(request: Request):
     body = await request.json()
     s = db.get_settings()
-    for k in ("canvas_w", "canvas_h", "box_w", "box_h", "card_ratio_w", "card_ratio_h", "bg_tol"):
+    for k in ("canvas_w", "canvas_h", "box_w", "box_h", "max_w", "card_ratio_w", "card_ratio_h", "bg_tol"):
         if k in body:
             body[k] = int(body[k])
     for k in ("scale_tol", "center_tol", "uniform_min"):
         if k in body:
             body[k] = float(body[k])
     merged = {**s, **body}
-    if merged["box_w"] > merged["canvas_w"] or merged["box_h"] > merged["canvas_h"]:
-        raise HTTPException(400, "The fit box can't be larger than the canvas")
+    if merged["box_w"] > merged["canvas_w"] or merged["box_h"] > merged["canvas_h"] or merged["max_w"] > merged["canvas_w"]:
+        raise HTTPException(400, "The fit box and max width can't be larger than the canvas")
+    if merged["fit_mode"] not in ("height", "box"):
+        raise HTTPException(400, "Size by must be height or box")
     db.save_settings(body)
     return _settings_out()
 
@@ -364,6 +388,14 @@ async def restore(request: Request):
     if not ids:
         raise HTTPException(400, "None of the selected images has a backup")
     return {"job": enqueue("restore", {"ids": ids})}
+
+
+@app.post("/api/mark")
+async def mark(request: Request):
+    body = await request.json()
+    if body.get("kind") not in ("photo", "flatlay"):
+        raise HTTPException(400, "kind must be photo or flatlay")
+    return {"job": enqueue("mark", {"ids": _ids(body), "kind": body["kind"]})}
 
 
 @app.post("/api/select")

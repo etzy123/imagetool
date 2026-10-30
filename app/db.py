@@ -16,6 +16,8 @@ _lock = threading.Lock()
 DEFAULTS = {
     "canvas_w": 2000, "canvas_h": 2000,
     "box_w": 1256, "box_h": 1256,
+    "fit_mode": "height",       # "height": same height for every product, width varies; "box": fit inside the box
+    "max_w": 1800,              # height mode: widest a product may become
     "scale_tol": 0.04,          # product may be 4% smaller or larger than the fit box
     "center_tol": 0.02,         # 2% of the canvas off-centre is allowed
     "uniform_min": 0.97,        # share of border pixels that must match for a "plain" background
@@ -44,6 +46,11 @@ with _lock:
     UPDATE jobs SET status='stopped' WHERE status='stopping';
     """)
     _conn.commit()
+    try:  # added later: manual "model shot" / "flatlay" marking, kept across rescans
+        _conn.execute("ALTER TABLE images ADD COLUMN override TEXT")
+        _conn.commit()
+    except sqlite3.OperationalError:
+        pass
 
 
 def _q(sql, args=(), one=False, write=False):
@@ -70,13 +77,14 @@ def save_settings(new: dict):
 
 
 def upsert_image(d: dict):
-    existing = _q("SELECT backup_path FROM images WHERE media_id=?", (d["media_id"],), one=True)
+    existing = _q("SELECT backup_path, override FROM images WHERE media_id=?", (d["media_id"],), one=True)
     _q("""INSERT OR REPLACE INTO images (media_id, product_id, title, handle, product_type, vendor, position,
-          url, width, height, category, status, reasons, metrics, stage, selected, backup_path, updated)
-          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'scanned', 0, ?, ?)""",
+          url, width, height, category, status, reasons, metrics, stage, selected, backup_path, updated, override)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'scanned', 0, ?, ?, ?)""",
        (d["media_id"], d["product_id"], d["title"], d["handle"], d["product_type"], d["vendor"], d["position"],
         d["url"], d["width"], d["height"], d["category"], d["status"], json.dumps(d["reasons"]),
-        json.dumps(d["metrics"]), existing["backup_path"] if existing else None, time.time()), write=True)
+        json.dumps(d["metrics"]), existing["backup_path"] if existing else None, time.time(),
+        existing["override"] if existing else None), write=True)
 
 
 def update_image(media_id, **fields):
@@ -102,6 +110,11 @@ def list_images():
             d[k] = json.loads(d[k]) if d[k] else None
         out.append(d)
     return out
+
+
+def get_override(media_id):
+    r = _q("SELECT override FROM images WHERE media_id=?", (media_id,), one=True)
+    return r["override"] if r else None
 
 
 def clear_images():
