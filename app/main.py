@@ -57,6 +57,16 @@ async def basic_auth(request: Request, call_next):
 # ---- job worker: one job at a time, so Shopify limits and memory stay safe --
 
 JOBS = queue.Queue()
+STOP = set()
+
+
+class Stopped(Exception):
+    pass
+
+
+def check_stop(jid):
+    if jid in STOP:
+        raise Stopped()
 
 
 def enqueue(kind, payload):
@@ -69,11 +79,16 @@ def worker():
     while True:
         jid = JOBS.get()
         job = db.get_job(jid)
+        if jid in STOP:
+            db.update_job(jid, status="stopped", finished=time.time())
+            continue
         db.update_job(jid, status="running")
         try:
             HANDLERS[job["kind"]](jid, json.loads(job["payload"]))
             j = db.get_job(jid)
             db.update_job(jid, status="done" if not j["failed"] else "done_with_errors", finished=time.time())
+        except Stopped:
+            db.update_job(jid, status="stopped", finished=time.time())
         except Exception as e:
             traceback.print_exc()
             db.update_job(jid, status="failed", message=str(e)[:500], finished=time.time())
@@ -89,7 +104,8 @@ def _q(v):
 
 
 def build_query(p, sh):
-    parts = [] if p.get("include_drafts") else ["status:active"]
+    status = p.get("status", "active")
+    parts = {"active": ["status:active"], "active_draft": ["(status:active OR status:draft)"], "all": []}.get(status, ["status:active"])
     for key, field in (("product_type", "product_type"), ("vendor", "vendor"), ("tag", "tag")):
         if p.get(key):
             parts.append(f"{field}:{_q(p[key].strip())}")
@@ -98,12 +114,13 @@ def build_query(p, sh):
     return " AND ".join(parts) or None
 
 
-def analyze_product(prod, spec):
-    """Check the first and second image of a product. Returns number of errors."""
+def analyze_product(prod, spec, positions=None):
+    """Check the chosen image positions of a product. Returns number of errors."""
+    positions = positions or spec["positions"]
     errors = 0
     pid = prod["id"].rsplit("/", 1)[1]
     for pos, m in enumerate(prod["media"]["nodes"], start=1):
-        if pos not in spec["positions"]:
+        if pos not in positions:
             continue
         if m["mediaContentType"] != "IMAGE" or not m.get("image"):
             continue
@@ -128,10 +145,12 @@ def analyze_product(prod, spec):
 def job_scan(jid, p):
     sh, spec = shop(), db.get_settings()
     q = build_query(p, sh)
+    positions = [int(x) for x in p.get("positions") or [1, 2]]
     db.update_job(jid, total=sh.count_products(q), message="Scanning")
     done = failed = 0
     for prod in sh.iter_products(q):
-        failed += analyze_product(prod, spec)
+        check_stop(jid)
+        failed += analyze_product(prod, spec, positions)
         done += 1
         db.update_job(jid, done=done, failed=failed, message=prod["title"])
 
@@ -143,6 +162,7 @@ def job_feed(jid, p):
     done = failed = 0
     missing = []
     for ref in refs:
+        check_stop(jid)
         try:
             prod = sh.product(ref)
             if prod:
@@ -173,6 +193,7 @@ def job_convert(jid, p):
     db.update_job(jid, total=len(ids))
     done = failed = 0
     for mid in ids:
+        check_stop(jid)
         row = db.get_image(mid)
         try:
             png, preview, warnings = imaging.process(download(row["url"]), spec)
@@ -214,6 +235,7 @@ def job_replace(jid, p):
     db.update_job(jid, total=len(ids))
     done = failed = 0
     for mid in ids:
+        check_stop(jid)
         row = db.get_image(mid)
         try:
             if row["stage"] != "converted" or not row["converted_path"]:
@@ -240,6 +262,7 @@ def job_restore(jid, p):
     done = failed = 0
     mimes = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png", "webp": "image/webp", "gif": "image/gif"}
     for mid in ids:
+        check_stop(jid)
         row = db.get_image(mid)
         try:
             if not row["backup_path"] or not Path(row["backup_path"]).exists():
@@ -356,8 +379,23 @@ def images():
 
 
 @app.delete("/api/images")
-def clear():
+def reset():
+    running = [j for j in db.recent_jobs(20) if j["status"] in ("queued", "running")]
+    if running:
+        raise HTTPException(409, "Stop the running job first, then reset")
     db.clear_images()
+    for sub in ("converted", "previews"):
+        for f in (DATA / sub).glob("*"):
+            f.unlink()
+    return {"ok": True}
+
+
+@app.post("/api/jobs/{jid}/stop")
+def stop(jid: int):
+    j = db.get_job(jid)
+    if not j or j["status"] not in ("queued", "running"):
+        raise HTTPException(400, "This job is not running")
+    STOP.add(jid)
     return {"ok": True}
 
 

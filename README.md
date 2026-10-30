@@ -4,7 +4,7 @@ Finds product images that don't fit the collection grid, lets you review them, a
 
 ## What it does
 
-1. **Scan catalog**: checks the first and second image of every matching product against the size standard. Read-only.
+1. **Scan catalog**: checks the first image, the second image or both, for active products only, active and drafts, or everything including archived. Read-only. **Stop** halts any running job after the current item.
 2. **Fix specific products**: paste product links, handles or IDs. Off-grid images are selected for you.
 3. **Review**: every image is shown in a card with the same proportions and colour as the shop grid, with the fit box drawn on it.
 4. **Convert**: cuts out the product (if needed), scales it until it touches the fit box and centres it on the canvas. Nothing changes in Shopify; you see before and after.
@@ -33,6 +33,8 @@ Required Admin API scopes: `read_products`, `write_products`, `read_files`, `wri
 Defaults follow the Notion page "Richtlijnen productfotografie": canvas 2000 × 2000, fit box 1256 × 1256. Change them under **Size standard** in the app, then scan again. All checks and conversions use the saved values.
 
 ## Notes
+
+- **Reset list** clears all scan results and converted images. Images already replaced in Shopify stay replaced, and backups of originals stay available under Download originals.
 
 - One job runs at a time (scan, convert, replace or restore). Progress shows at the top.
 - Originals can be downloaded as one zip under Size standard, "Download originals".

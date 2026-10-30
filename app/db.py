@@ -41,6 +41,7 @@ with _lock:
         total INTEGER DEFAULT 0, done INTEGER DEFAULT 0, failed INTEGER DEFAULT 0,
         message TEXT, created REAL, finished REAL);
     UPDATE jobs SET status='interrupted', finished=strftime('%s','now') WHERE status IN ('queued','running');
+    UPDATE jobs SET status='stopped' WHERE status='stopping';
     """)
     _conn.commit()
 
@@ -104,7 +105,8 @@ def list_images():
 
 
 def clear_images():
-    _q("DELETE FROM images WHERE stage NOT IN ('replaced')", write=True)
+    """Empty the review list. Backups of originals stay on disk (Download originals)."""
+    _q("DELETE FROM images", write=True)
 
 
 def set_selected(ids, value):

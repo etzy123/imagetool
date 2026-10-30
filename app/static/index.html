@@ -52,6 +52,13 @@
   .row { display: flex; gap: 12px; align-items: center; margin-top: 16px; flex-wrap: wrap; }
   .check { display: flex; gap: 8px; align-items: center; flex-direction: row; color: var(--ink); font-size: 14px; }
   .hint { font-size: 13px; color: var(--muted); }
+  .choices { display: flex; gap: 40px; flex-wrap: wrap; margin-top: 18px; }
+  fieldset { border: 0; padding: 0; margin: 0; display: grid; gap: 6px; align-content: start; }
+  legend { font-size: 13px; color: var(--muted); margin-bottom: 4px; padding: 0; }
+  #job { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  #job .stop { padding: 5px 14px; font-size: 13px; border-color: var(--danger); color: var(--danger); }
+  #job .jobtext { min-width: 220px; }
+  .reset { font-size: 14px; color: var(--muted); background: none; border: 0; cursor: pointer; text-decoration: underline; padding: 6px 4px; margin-left: 12px; }
 
   .filters { display: flex; gap: 4px; padding: 28px 40px 0; flex-wrap: wrap; align-items: center; }
   .filter { border: 0; background: transparent; padding: 6px 12px; border-radius: 999px; cursor: pointer; color: var(--muted); }
@@ -122,15 +129,27 @@
 </nav>
 
 <section class="panel" id="scan" hidden>
-  <p>Checks the first and second image of every matching product against the size standard. Nothing changes in Shopify. Leave everything empty to scan all active products.</p>
+  <p>Checks the chosen images of every matching product against the size standard. Nothing changes in Shopify. Leave the filters empty to scan everything.</p>
   <div class="fields">
     <label>Product type<input type="text" id="s-type" placeholder="Jackets"></label>
     <label>Vendor<input type="text" id="s-vendor" placeholder="Malbon Golf"></label>
     <label>Tag<input type="text" id="s-tag"></label>
     <label>Collection handle<input type="text" id="s-coll" placeholder="new-arrivals"></label>
   </div>
+  <div class="choices">
+    <fieldset>
+      <legend>Images to check</legend>
+      <label class="check"><input type="checkbox" id="s-pos1" checked> First image</label>
+      <label class="check"><input type="checkbox" id="s-pos2" checked> Second image</label>
+    </fieldset>
+    <fieldset>
+      <legend>Products</legend>
+      <label class="check"><input type="radio" name="s-status" value="active" checked> Active only</label>
+      <label class="check"><input type="radio" name="s-status" value="active_draft"> Active and drafts</label>
+      <label class="check"><input type="radio" name="s-status" value="all"> All, including archived</label>
+    </fieldset>
+  </div>
   <div class="row">
-    <label class="check"><input type="checkbox" id="s-drafts"> Include drafts</label>
     <span class="spacer"></span>
     <button class="btn solid" id="do-scan">Scan catalog</button>
   </div>
@@ -242,9 +261,14 @@ async function startJob(path, body, label) {
   try { await api(path, { method: "POST", body: JSON.stringify(body) }); toast(label); pollJobs(); }
   catch (e) { toast(e.message, true); }
 }
-$("do-scan").onclick = () => startJob("/api/scan", {
-  product_type: $("s-type").value, vendor: $("s-vendor").value, tag: $("s-tag").value,
-  collection: $("s-coll").value, include_drafts: $("s-drafts").checked }, "Scan started");
+$("do-scan").onclick = () => {
+  const positions = [[1, "s-pos1"], [2, "s-pos2"]].filter(([, id]) => $(id).checked).map(([n]) => n);
+  if (!positions.length) return toast("Tick at least one image to check.", true);
+  startJob("/api/scan", {
+    product_type: $("s-type").value, vendor: $("s-vendor").value, tag: $("s-tag").value,
+    collection: $("s-coll").value, positions,
+    status: document.querySelector("input[name=s-status]:checked").value }, "Scan started");
+};
 $("do-feed").onclick = () => startJob("/api/feed", { refs: $("f-refs").value }, "Loading products");
 
 const KIND = { scan: "Scanning catalog", feed: "Loading products", convert: "Converting", replace: "Replacing in Shopify", restore: "Restoring originals" };
@@ -257,10 +281,17 @@ async function pollJobs() {
   const pct = j.total ? Math.round(j.done / j.total * 100) : 0;
   let text;
   if (running) text = `<b>${KIND[j.kind]}</b> ${j.done} of ${j.total || "?"}${j.failed ? `, ${j.failed} failed` : ""}. ${esc(j.message || "")}`;
+  else if (j.status === "stopped") text = `<b>${KIND[j.kind]} stopped</b> after ${j.done} of ${j.total || "?"}.`;
   else if (j.status === "failed") text = `<b>${KIND[j.kind]} stopped:</b> ${esc(j.message)}`;
   else if (j.status === "interrupted") text = `<b>${KIND[j.kind]} was interrupted</b> by a restart. Start it again.`;
   else text = `<b>${DONE[j.kind]}</b>: ${j.done} done${j.failed ? `, ${j.failed} failed (see the Failed filter)` : ""}.`;
-  $("job").innerHTML = text + (running ? `<div class="bar"><i style="width:${pct}%"></i></div>` : "");
+  $("job").innerHTML = `<div class="jobtext">${text}${running ? `<div class="bar"><i style="width:${pct}%"></i></div>` : ""}</div>`
+    + (running ? `<button class="btn stop" id="stop-job">Stop</button>` : "");
+  if (running) $("stop-job").onclick = async () => {
+    try { await api(`/api/jobs/${j.id}/stop`, { method: "POST" }); $("stop-job").disabled = true; $("stop-job").textContent = "Stopping"; }
+    catch (e) { toast(e.message, true); }
+  };
+  S.running = running;
   const key = j.id + j.status + j.done;
   if (key !== S.lastJob) { S.lastJob = key; await loadImages(); }
   if (running) setTimeout(pollJobs, 2000);
@@ -273,9 +304,15 @@ function render() {
   const f = $("filters");
   f.innerHTML = FILTERS.map(([key, label, fn]) =>
     `<button class="filter" aria-pressed="${S.filter === key}" data-f="${key}">${label}<span class="n">${S.images.filter(fn).length}</span></button>`
-  ).join("") + `<span class="spacer"></span><label class="check toggle"><input type="checkbox" id="boxtoggle" ${document.body.classList.contains("showbox") ? "checked" : ""}> Show fit box</label>`;
+  ).join("") + (S.images.length ? `<button class="reset" id="reset">Reset list</button>` : "") + `<span class="spacer"></span><label class="check toggle"><input type="checkbox" id="boxtoggle" ${document.body.classList.contains("showbox") ? "checked" : ""}> Show fit box</label>`;
   f.querySelectorAll("[data-f]").forEach(b => b.onclick = () => { S.filter = b.dataset.f; render(); });
   $("boxtoggle").onchange = e => document.body.classList.toggle("showbox", e.target.checked);
+  if ($("reset")) $("reset").onclick = async () => {
+    if (S.running) return toast("Stop the running job first, then reset.", true);
+    if (!confirm("Clear all scan results and converted images? Images already replaced in Shopify stay replaced. Backups of the originals stay available under Size standard, Download originals.")) return;
+    try { await api("/api/images", { method: "DELETE" }); S.after.clear(); S.filter = "off"; await loadImages(); toast("List reset"); }
+    catch (e) { toast(e.message, true); }
+  };
 
   const fn = FILTERS.find(x => x[0] === S.filter)[2];
   const list = S.images.filter(fn);
