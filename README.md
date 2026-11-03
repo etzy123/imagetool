@@ -32,7 +32,9 @@ Required Admin API scopes: `read_products`, `write_products`, `read_files`, `wri
 
 **Size by height** (default): every product gets the same height (the fit box height) and the width may vary up to the max width. This keeps grid rows level. **Size by fit box**: each product is scaled until it touches the box, so wide items end up shorter.
 
-Canvas and height follow the Notion page "Richtlijnen productfotografie": canvas 2000 × 2000, product height 1256 px. Max width defaults to 1800 px. Change them under **Size standard** in the app, then scan again. All checks and conversions use the saved values.
+Canvas and height follow the Notion page "Richtlijnen productfotografie": canvas 2000 × 2000, product height 1256 px. Max width defaults to 1360 px.
+
+The shop theme scales each image to the card's height and crops the sides, so a square canvas in the 374 × 505 card only shows its middle 1481 px. The app never makes a product wider than that visible part minus a 4% margin, flags existing images that are cut off at the sides, and the review screen crops images the same way the shop does. If the card shape changes, update the card width and height under Size standard. Change them under **Size standard** in the app, then scan again. All checks and conversions use the saved values.
 
 ## Notes
 

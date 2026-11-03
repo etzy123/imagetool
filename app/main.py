@@ -321,7 +321,9 @@ def index():
 
 
 def _settings_out():
-    return {**db.get_settings(), "store": os.getenv("SHOPIFY_STORE", "").replace("https://", "").strip("/")}
+    s = db.get_settings()
+    return {**s, "store": os.getenv("SHOPIFY_STORE", "").replace("https://", "").strip("/"),
+            "visible_w": round(imaging.visible_width(s)), "width_limit": round(imaging.width_limit(s))}
 
 
 @app.get("/api/settings")

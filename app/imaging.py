@@ -170,6 +170,10 @@ def analyze(data: bytes, spec: dict, orig_w: int = None, orig_h: int = None, for
         reasons.append(f"Product too small ({fill:.0%} of standard {size_word})")
     elif fill > 1 + tol:
         reasons.append(f"Product too large ({fill:.0%} of standard {size_word})")
+    vis = min(W, H * spec["card_ratio_w"] / spec["card_ratio_h"])
+    left, right = x0 / w * W, x1 / w * W
+    if left < (W - vis) / 2 or right > (W + vis) / 2:
+        reasons.append("Cut off at the sides in the grid")
     if abs(dx) > spec["center_tol"]:
         reasons.append("Not centred horizontally")
     if abs(dy) > spec["center_tol"]:
@@ -186,12 +190,18 @@ def analyze(data: bytes, spec: dict, orig_w: int = None, orig_h: int = None, for
     }
 
 
+def visible_width(spec):
+    """Width of the canvas that is visible in a grid card. The shop theme scales the
+    image to the card's height and crops the sides, so a square canvas in a portrait
+    card only shows its middle part."""
+    return min(spec["canvas_w"], spec["canvas_h"] * spec["card_ratio_w"] / spec["card_ratio_h"])
+
+
 def width_limit(spec):
-    """Widest a product may be. Height mode lets width vary up to max_w,
-    fit-box mode keeps it inside the fit box."""
-    if spec.get("fit_mode") == "height":
-        return spec.get("max_w") or spec["canvas_w"]
-    return spec["box_w"]
+    """Widest a product may be: max width (height mode) or fit box width, but never
+    wider than the visible part of the card minus a 4% margin on each side."""
+    lim = (spec.get("max_w") or spec["canvas_w"]) if spec.get("fit_mode") == "height" else spec["box_w"]
+    return min(lim, visible_width(spec) * 0.92)
 
 
 def cutout(im: Image.Image) -> Image.Image:
@@ -258,7 +268,7 @@ def fit(rgba: Image.Image, spec: dict):
     limit = width_limit(spec)
     scale = min(limit / pw, bh / ph)
     if spec.get("fit_mode") == "height" and limit / pw < bh / ph:
-        warnings.append("Very wide product: limited by max width, so it is shorter than the standard height")
+        warnings.append(f"Wide product: kept {round(ph * scale)} px tall so it isn't cut off in the grid")
     if scale > 1.15:
         warnings.append(f"Upscaled {scale:.0%}: source is small, check sharpness")
     size = (max(1, round(pw * scale)), max(1, round(ph * scale)))

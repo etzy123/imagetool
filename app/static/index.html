@@ -76,7 +76,7 @@
 
   .item { position: relative; }
   .frame { position: relative; background: var(--card); overflow: hidden; cursor: pointer; }
-  .frame img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+  .frame img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
   .frame img.broken { visibility: hidden; }
   .canvas { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); pointer-events: none; }
   .fitbox { position: absolute; outline: 1.5px dashed var(--flag); display: none; }
@@ -251,7 +251,7 @@ function fillSettings() {
   }
   const s = S.settings;
   $("margins").textContent = s.fit_mode === "height"
-    ? `Every product ${s.box_h} px tall (${Math.round(s.box_h / s.canvas_h * 100)}% of the canvas), ${(s.canvas_h - s.box_h) / 2} px above and below, at most ${s.max_w} px wide.`
+    ? `Every product ${s.box_h} px tall, ${(s.canvas_h - s.box_h) / 2} px above and below, at most ${s.width_limit} px wide. The grid shows the middle ${s.visible_w} px of the canvas width; wider products are kept narrower so they aren't cut off.`
     : `Margins: ${(s.canvas_w - s.box_w) / 2} px left and right, ${(s.canvas_h - s.box_h) / 2} px top and bottom.`;
   $("mode-note").textContent = s.fit_mode === "height"
     ? `Checking by height: every product should be ${s.box_h} px tall on a ${s.canvas_w} × ${s.canvas_h} canvas.`
@@ -398,18 +398,18 @@ function card(i) {
 function guide(s) {
   const top = (s.canvas_h - s.box_h) / 2 / s.canvas_h * 100, h = s.box_h / s.canvas_h * 100;
   if (s.fit_mode === "height") {
-    const w = s.max_w / s.canvas_w * 100;
+    const w = s.width_limit / s.canvas_w * 100;
     return `<div class="fitbox lines" style="left:${(100 - w) / 2}%;width:${w}%;top:${top}%;height:${h}%"></div>`;
   }
   const w = s.box_w / s.canvas_w * 100;
   return `<div class="fitbox" style="left:${(100 - w) / 2}%;width:${w}%;top:${top}%;height:${h}%"></div>`;
 }
 
-/* the fit box is drawn on the standard canvas, shown "contain" inside the card */
+/* the guide is drawn on the standard canvas, cropped to the card exactly like the shop theme does */
 function layoutCanvases() {
   document.querySelectorAll(".canvas").forEach(c => {
     const fr = c.parentElement, W = fr.clientWidth, H = fr.clientHeight, r = +c.dataset.ratio;
-    let w = W, h = W / r; if (h > H) { h = H; w = H * r; }
+    let w = W, h = W / r; if (h < H) { h = H; w = H * r; }  /* cover, like the shop grid */
     c.style.width = w + "px"; c.style.height = h + "px";
   });
 }
