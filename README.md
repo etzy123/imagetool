@@ -6,7 +6,9 @@ Finds product images that don't fit the collection grid, lets you review them, a
 
 1. **Scan catalog**: checks the first image, the second image or both, for active products only, active and drafts, or everything including archived. Read-only. **Stop** halts any running job after the current item.
 2. **Fix specific products**: paste product links, handles or IDs. Off-grid images are selected for you.
-3. **Review**: every image is shown in a card with the same proportions and colour as the shop grid, with the fit box drawn on it.
+3. **Select**: click a card to select it, shift-click to select everything between the last clicked card and this one (in the order shown). Shift-click after deselecting a card deselects the range instead. **Select all shown** selects everything in the current filter.
+4. **Ignore**: use **Ignore** under an image, or select cards and use the Ignore button in the bar, to leave images out of every future scan, for example photos that keep coming back as off grid but are fine. They show under the **Ignored** filter, where **Stop ignoring** brings them back. The ignore list is stored per image, survives **Reset list** and is respected by **Fix specific products** too. If an image is replaced by a different file in Shopify, it gets a new ID and is checked again.
+5. **Review**: every image is shown in a card with the same proportions and colour as the shop grid, with the fit box drawn on it.
 4. **Convert**: cuts out the product (if needed), scales it until it touches the fit box and centres it on the canvas. Nothing changes in Shopify; you see before and after.
 5. **Replace in Shopify**: backs up the original, uploads the new file and swaps it in place. Gallery position, alt text and variant links stay intact. The result is re-checked on the live image.
 6. **Restore original**: puts the backed-up original back.

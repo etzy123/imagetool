@@ -117,7 +117,7 @@ def build_query(p, sh):
     return " AND ".join(parts) or None
 
 
-def analyze_product(prod, spec, positions=None):
+def analyze_product(prod, spec, positions=None, ignored=frozenset()):
     """Check the chosen image positions of a product. Returns number of errors."""
     positions = positions or spec["positions"]
     errors = 0
@@ -131,6 +131,10 @@ def analyze_product(prod, spec, positions=None):
         base = {"media_id": m["id"], "product_id": pid, "title": prod["title"], "handle": prod["handle"],
                 "product_type": prod["productType"], "vendor": prod["vendor"], "position": pos,
                 "url": img["url"], "width": img["width"], "height": img["height"]}
+        if m["id"] in ignored:
+            db.upsert_image({**base, "category": "ignored", "status": "ignored",
+                             "reasons": ["Ignored: left out of all scans"], "metrics": {}})
+            continue
         if prod["productType"] in spec["excluded_types"]:
             res = {"category": "excluded", "status": "skip",
                    "reasons": [f"Product type '{prod['productType']}' is excluded"], "metrics": {}}
@@ -148,12 +152,13 @@ def analyze_product(prod, spec, positions=None):
 def job_scan(jid, p):
     sh, spec = shop(), db.get_settings()
     q = build_query(p, sh)
+    ignored = db.ignored_ids()
     positions = [int(x) for x in p.get("positions") or [1, 2]]
     db.update_job(jid, total=sh.count_products(q), message="Scanning")
     done = failed = 0
     for prod in sh.iter_products(q):
         check_stop(jid)
-        failed += analyze_product(prod, spec, positions)
+        failed += analyze_product(prod, spec, positions, ignored)
         done += 1
         db.update_job(jid, done=done, failed=failed, message=prod["title"])
 
@@ -161,6 +166,7 @@ def job_scan(jid, p):
 def job_feed(jid, p):
     sh, spec = shop(), db.get_settings()
     refs = [r for r in p["refs"] if r.strip()]
+    ignored = db.ignored_ids()
     db.update_job(jid, total=len(refs))
     done = failed = 0
     missing = []
@@ -169,7 +175,7 @@ def job_feed(jid, p):
         try:
             prod = sh.product(ref)
             if prod:
-                failed += analyze_product(prod, spec)
+                failed += analyze_product(prod, spec, ignored=ignored)
                 # Products fed by hand are meant to be fixed: preselect what is off.
                 ids = [m["id"] for m in prod["media"]["nodes"]]
                 db.set_selected([i for i in ids if (db.get_image(i) or {"status": ""})["status"] == "off"], True)
@@ -307,7 +313,31 @@ def job_mark(jid, p):
         db.update_job(jid, done=done, failed=failed, message=row["title"])
 
 
-HANDLERS = {"mark": job_mark, "scan": job_scan, "feed": job_feed, "convert": job_convert,
+def job_recheck(jid, p):
+    """Check images again, e.g. after they stop being ignored."""
+    spec = db.get_settings()
+    ids = p["ids"]
+    db.update_job(jid, total=len(ids))
+    done = failed = 0
+    for mid in ids:
+        check_stop(jid)
+        row = db.get_image(mid)
+        if not row:
+            done += 1
+            continue
+        try:
+            data = download(sized_url(row["url"], 1200))
+            res = imaging.analyze(data, spec, row["width"], row["height"], force=db.get_override(mid))
+            db.update_image(mid, category=res["category"], status=res["status"], reasons=res["reasons"],
+                            metrics=res["metrics"], stage="scanned", selected=0, error=None)
+        except Exception as e:
+            failed += 1
+            db.update_image(mid, error=f"Recheck: {e}"[:400])
+        done += 1
+        db.update_job(jid, done=done, failed=failed, message=row["title"])
+
+
+HANDLERS = {"recheck": job_recheck, "mark": job_mark, "scan": job_scan, "feed": job_feed, "convert": job_convert,
             "replace": job_replace, "restore": job_restore}
 
 
@@ -325,7 +355,7 @@ def index():
 
 def _settings_out():
     s = db.get_settings()
-    return {**s, "store": os.getenv("SHOPIFY_STORE", "").replace("https://", "").strip("/"),
+    return {**s, "ignored_count": db.count_ignored(), "store": os.getenv("SHOPIFY_STORE", "").replace("https://", "").strip("/"),
             "visible_w": round(imaging.visible_width(s)), "width_limit": round(imaging.width_limit(s))}
 
 
@@ -413,6 +443,25 @@ async def mark(request: Request):
     if body.get("kind") not in ("photo", "flatlay"):
         raise HTTPException(400, "kind must be photo or flatlay")
     return {"job": enqueue("mark", {"ids": _ids(body), "kind": body["kind"]})}
+
+
+@app.post("/api/ignore")
+async def ignore(request: Request):
+    body = await request.json()
+    ids = body.get("ids") or []
+    if not ids:
+        raise HTTPException(400, "No images selected")
+    if body.get("ignore", True):
+        db.add_ignored(ids)
+        return {"ok": True, "job": None}
+    db.remove_ignored(ids)
+    return {"ok": True, "job": enqueue("recheck", {"ids": ids})}
+
+
+@app.delete("/api/ignored")
+def clear_ignored():
+    ids = [i for i in db.clear_ignored() if (db.get_image(i) or {"status": None})["status"] == "ignored"]
+    return {"ok": True, "job": enqueue("recheck", {"ids": ids}) if ids else None}
 
 
 @app.post("/api/select")

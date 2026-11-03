@@ -42,6 +42,8 @@ with _lock:
         id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT, payload TEXT, status TEXT,
         total INTEGER DEFAULT 0, done INTEGER DEFAULT 0, failed INTEGER DEFAULT 0,
         message TEXT, created REAL, finished REAL);
+    CREATE TABLE IF NOT EXISTS ignored (
+        media_id TEXT PRIMARY KEY, product_id TEXT, title TEXT, handle TEXT, position INTEGER, created REAL);
     UPDATE jobs SET status='interrupted', finished=strftime('%s','now') WHERE status IN ('queued','running');
     UPDATE jobs SET status='stopped' WHERE status='stopping';
     """)
@@ -145,3 +147,41 @@ def get_job(jid):
 
 def recent_jobs(n=8):
     return [dict(r) for r in _q("SELECT * FROM jobs ORDER BY id DESC LIMIT ?", (n,))]
+
+
+# ---- ignore list: images that are left out of every scan (survives "Reset list") ----
+
+def ignored_ids():
+    return {r["media_id"] for r in _q("SELECT media_id FROM ignored")}
+
+
+def count_ignored():
+    return _q("SELECT COUNT(*) AS n FROM ignored", one=True)["n"]
+
+
+def add_ignored(ids):
+    with _lock:
+        for i in ids:
+            r = _conn.execute("SELECT product_id, title, handle, position FROM images WHERE media_id=?", (i,)).fetchone()
+            if not r:
+                continue
+            _conn.execute("INSERT OR REPLACE INTO ignored VALUES (?,?,?,?,?,?)",
+                          (i, r["product_id"], r["title"], r["handle"], r["position"], time.time()))
+            _conn.execute("""UPDATE images SET category='ignored', status='ignored', reasons=?, stage='scanned',
+                             selected=0, error=NULL, updated=? WHERE media_id=?""",
+                          (json.dumps(["Ignored: left out of all scans"]), time.time(), i))
+        _conn.commit()
+
+
+def remove_ignored(ids):
+    with _lock:
+        _conn.executemany("DELETE FROM ignored WHERE media_id=?", [(i,) for i in ids])
+        _conn.commit()
+
+
+def clear_ignored():
+    with _lock:
+        ids = [r["media_id"] for r in _conn.execute("SELECT media_id FROM ignored")]
+        _conn.execute("DELETE FROM ignored")
+        _conn.commit()
+    return ids

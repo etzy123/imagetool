@@ -58,8 +58,10 @@
   #job { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
   #job .stop { padding: 5px 14px; font-size: 13px; border-color: var(--danger); color: var(--danger); }
   #job .jobtext { min-width: 220px; }
+  .marks { display: flex; gap: 14px; flex-wrap: wrap; }
   .mark { margin-top: 6px; font-size: 12px; color: var(--muted); background: none; border: 0; padding: 0;
     cursor: pointer; text-decoration: underline; }
+  .tip { margin-left: 16px; }
   .types { margin-top: 18px; }
   .row.tight { margin: 4px 0 10px; gap: 14px; }
   .linkbtn { background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline; color: var(--ink); font-size: 14px; }
@@ -102,6 +104,7 @@
   .meta .sub { color: var(--muted); }
   .meta ul { margin: 6px 0 0; padding: 0; list-style: none; }
   .meta li { color: var(--flag); }
+  .meta li.mut { color: var(--muted); }
   .meta li.good { color: var(--ok); }
   .meta li.err { color: var(--danger); }
 
@@ -169,6 +172,10 @@
     </div>
     <div class="typelist" id="typelist"><span class="hint">Loading product types from Shopify</span></div>
   </fieldset>
+  <div class="row tight">
+    <span class="hint" id="ignored-note"></span>
+    <button class="linkbtn" id="clear-ignored" hidden>Stop ignoring all</button>
+  </div>
   <div class="row">
     <span class="spacer"></span>
     <button class="btn solid" id="do-scan">Scan catalog</button>
@@ -214,6 +221,7 @@
   <span id="sel-count"></span>
   <button class="btn" id="sel-all">Select all shown</button>
   <button class="btn" id="sel-none">Clear</button>
+  <button class="btn" id="do-ignore">Ignore</button>
   <button class="btn solid" id="do-convert">Convert</button>
   <button class="btn warn" id="do-replace">Replace in Shopify</button>
   <button class="btn" id="do-restore">Restore original</button>
@@ -230,8 +238,9 @@ const FILTERS = [
   ["failed", "Failed", i => i.stage === "failed" || i.status === "error"],
   ["ok", "On grid", i => i.status === "ok" && i.stage === "scanned"],
   ["photo", "Model shots", i => i.category === "photo"],
+  ["ignored", "Ignored", i => i.status === "ignored"],
   ["skip", "Other skipped", i => i.status === "skip" && i.category !== "photo" && i.stage === "scanned"],
-  ["all", "All flatlays", i => i.category !== "photo"],
+  ["all", "All flatlays", i => i.category !== "photo" && i.status !== "ignored"],
 ];
 
 const $ = id => document.getElementById(id);
@@ -325,8 +334,8 @@ $("do-scan").onclick = () => {
 };
 $("do-feed").onclick = () => startJob("/api/feed", { refs: $("f-refs").value }, "Loading products");
 
-const KIND = { mark: "Rechecking", scan: "Scanning catalog", feed: "Loading products", convert: "Converting", replace: "Replacing in Shopify", restore: "Restoring originals" };
-const DONE = { mark: "Recheck finished", scan: "Scan finished", feed: "Products loaded", convert: "Conversion finished", replace: "Replaced in Shopify", restore: "Originals restored" };
+const KIND = { recheck: "Rechecking", mark: "Rechecking", scan: "Scanning catalog", feed: "Loading products", convert: "Converting", replace: "Replacing in Shopify", restore: "Restoring originals" };
+const DONE = { recheck: "Recheck finished", mark: "Recheck finished", scan: "Scan finished", feed: "Products loaded", convert: "Conversion finished", replace: "Replaced in Shopify", restore: "Originals restored" };
 async function pollJobs() {
   const jobs = await api("/api/jobs").catch(() => []);
   const j = jobs[0];
@@ -358,18 +367,19 @@ function render() {
   const f = $("filters");
   f.innerHTML = FILTERS.map(([key, label, fn]) =>
     `<button class="filter" aria-pressed="${S.filter === key}" data-f="${key}">${label}<span class="n">${visible().filter(fn).length}</span></button>`
-  ).join("") + (S.images.length ? `<button class="reset" id="reset">Reset list</button>` : "") + `<span class="spacer"></span><label class="check toggle"><input type="checkbox" id="boxtoggle" ${document.body.classList.contains("showbox") ? "checked" : ""}> Show ${S.settings.fit_mode === "height" ? "height lines" : "fit box"}</label>`;
+  ).join("") + (S.images.length ? `<button class="reset" id="reset">Reset list</button><span class="hint tip">Shift-click selects everything between two cards</span>` : "") + `<span class="spacer"></span><label class="check toggle"><input type="checkbox" id="boxtoggle" ${document.body.classList.contains("showbox") ? "checked" : ""}> Show ${S.settings.fit_mode === "height" ? "height lines" : "fit box"}</label>`;
   f.querySelectorAll("[data-f]").forEach(b => b.onclick = () => { S.filter = b.dataset.f; render(); });
   $("boxtoggle").onchange = e => document.body.classList.toggle("showbox", e.target.checked);
   if ($("reset")) $("reset").onclick = async () => {
     if (S.running) return toast("Stop the running job first, then reset.", true);
-    if (!confirm("Clear all scan results and converted images? Images already replaced in Shopify stay replaced. Backups of the originals stay available under Size standard, Download originals.")) return;
+    if (!confirm("Clear all scan results and converted images? Images already replaced in Shopify stay replaced. The ignore list is kept. Backups of the originals stay available under Size standard, Download originals.")) return;
     try { await api("/api/images", { method: "DELETE" }); S.after.clear(); S.filter = "off"; await loadImages(); toast("List reset"); }
     catch (e) { toast(e.message, true); }
   };
 
   const fn = FILTERS.find(x => x[0] === S.filter)[2];
   const list = visible().filter(fn);
+  S.shown = list.map(i => i.media_id);
   const g = $("grid");
   if (!list.length) {
     g.innerHTML = S.images.length
@@ -377,13 +387,17 @@ function render() {
       : `<div class="empty"><strong>No images checked yet.</strong>Scan the catalog to find images that don't fit the grid, or paste specific products under Fix specific products.</div>`;
   } else g.innerHTML = list.map(card).join("");
   layoutCanvases();
+  S.els = new Map();
+  g.onmousedown = e => { if (e.shiftKey) e.preventDefault(); };   /* no text highlighting while range-selecting */
   g.querySelectorAll(".item").forEach(el => {
     const id = el.dataset.id;
-    el.querySelector(".pick").onchange = e => setSel([id], e.target.checked);
-    el.querySelector(".frame").onclick = e => { if (e.target.closest(".flip")) return; setSel([id], !imgById(id).selected); };
-    const mk = el.querySelector(".mark");
-    if (mk) mk.onclick = () => startJob("/api/mark", { ids: [id], kind: mk.dataset.kind },
-      mk.dataset.kind === "photo" ? "Moved to Model shots" : "Rechecking as a flatlay");
+    S.els.set(id, el);
+    el.querySelector(".frame").onclick = e => { if (e.target.closest(".flip")) return; pick(id, e.shiftKey); };
+    el.querySelectorAll(".mark").forEach(mk => mk.onclick = () => {
+      if (mk.dataset.ignore !== undefined) return ignoreIds([id], mk.dataset.ignore === "1");
+      startJob("/api/mark", { ids: [id], kind: mk.dataset.kind },
+        mk.dataset.kind === "photo" ? "Moved to Model shots" : "Rechecking as a flatlay");
+    });
     const flip = el.querySelector(".flip");
     if (flip) flip.onclick = () => { S.after.has(id) ? S.after.delete(id) : S.after.add(id); render(); };
   });
@@ -402,11 +416,17 @@ function card(i) {
   else if (i.stage === "restored") badge = `<span class="badge muted">Original</span>`;
   else if (converted) badge = `<span class="badge okb">${showAfter ? "After" : "Before"}</span>`;
   else if (i.status === "off") badge = `<span class="badge">Off grid</span>`;
+  else if (i.status === "ignored") badge = `<span class="badge muted">Ignored</span>`;
   else if (i.status === "skip") badge = `<span class="badge muted">Skipped</span>`;
 
-  const markBtn = i.stage !== "scanned" ? "" : i.category === "photo"
-    ? `<button class="mark" data-kind="flatlay">Not a model shot</button>`
-    : ["plain", "cutout"].includes(i.category) ? `<button class="mark" data-kind="photo">Model shot</button>` : "";
+  const ignored = i.status === "ignored";
+  const links = [];
+  if (!ignored && i.stage === "scanned") {
+    if (i.category === "photo") links.push(`<button class="mark" data-kind="flatlay">Not a model shot</button>`);
+    else if (["plain", "cutout"].includes(i.category)) links.push(`<button class="mark" data-kind="photo">Model shot</button>`);
+  }
+  links.push(`<button class="mark" data-ignore="${ignored ? 0 : 1}">${ignored ? "Stop ignoring" : "Ignore"}</button>`);
+  const markBtn = `<div class="marks">${links.join("")}</div>`;
   let notes = [];
   if (converted && showAfter && i.after) {
     notes = i.after.reasons.length ? i.after.reasons.map(r => `<li>${esc(r)}</li>`) : [`<li class="good">Fits the grid</li>`];
@@ -415,6 +435,7 @@ function card(i) {
     notes = (i.reasons || []).map(r => `<li>${esc(r)}</li>`);
     if (i.status === "ok") notes.push(`<li class="good">Fits the grid</li>`);
   }
+  if (ignored) notes = notes.map(n => n.replace("<li>", '<li class="mut">'));
   if (i.error) notes.push(`<li class="err">${esc(i.error)}</li>`);
   const admin = s.store ? `https://${s.store}/admin/products/${i.product_id}` : "#";
   const pos = i.position === 1 ? "First image" : i.position === 2 ? "Second image" : `Image ${i.position}`;
@@ -459,9 +480,26 @@ function layoutCanvases() {
 window.addEventListener("resize", layoutCanvases);
 
 /* selection */
+/* click selects or deselects one card; shift-click applies the anchor's state to every card between
+   the anchor (last clicked card) and this one, in the order shown on screen */
+function pick(id, shift) {
+  const ids = S.shown || [];
+  const val = shift && S.anchor && S.anchor !== id && ids.includes(S.anchor) ? S.anchorVal : !imgById(id).selected;
+  let range = [id];
+  if (shift && S.anchor && S.anchor !== id && ids.includes(S.anchor)) {
+    const a = ids.indexOf(S.anchor), b = ids.indexOf(id);
+    range = ids.slice(Math.min(a, b), Math.max(a, b) + 1);
+  }
+  S.anchor = id; S.anchorVal = val;
+  setSel(range, val);
+}
 async function setSel(ids, val) {
   ids.forEach(id => { const i = imgById(id); if (i) i.selected = val ? 1 : 0; });
-  render();
+  ids.forEach(id => {                       /* update the cards in place: no re-render, no flicker, fast for hundreds */
+    const el = S.els && S.els.get(id);
+    if (el) { el.classList.toggle("selected", !!val); el.querySelector(".pick").checked = !!val; }
+  });
+  updateActions();
   api("/api/select", { method: "POST", body: JSON.stringify({ ids, selected: val }) }).catch(e => toast(e.message, true));
 }
 function selected() { return visible().filter(i => i.selected); }
@@ -470,15 +508,44 @@ function updateActions() {
   $("actions").classList.toggle("on", n > 0);
   $("sel-count").textContent = `${n} selected`;
   const conv = sel.filter(i => i.stage === "converted").length;
+  const ign = S.filter === "ignored";
+  $("do-ignore").textContent = ign ? "Stop ignoring" : "Ignore";
+  $("do-ignore").disabled = !sel.some(i => (i.status === "ignored") === ign);
   $("do-replace").disabled = !conv;
   $("do-replace").textContent = conv ? `Replace ${conv} in Shopify` : "Replace in Shopify";
   $("do-restore").disabled = !sel.some(i => i.backup_path);
 }
 $("sel-all").onclick = () => setSel(visible().filter(FILTERS.find(x => x[0] === S.filter)[2]).map(i => i.media_id), true);
 $("sel-none").onclick = () => setSel(selected().map(i => i.media_id), false);
+$("do-ignore").onclick = () => {
+  const ign = S.filter === "ignored";
+  ignoreIds(selected().filter(i => (i.status === "ignored") === ign).map(i => i.media_id), !ign);
+};
+async function ignoreIds(ids, on) {
+  if (!ids.length) return;
+  try {
+    const r = await api("/api/ignore", { method: "POST", body: JSON.stringify({ ids, ignore: on }) });
+    S.settings = await api("/api/settings"); updateIgnoredNote(); S.anchor = null;
+    await loadImages();
+    toast(on ? `${ids.length} ignored. They stay out of every scan. Undo under the Ignored filter.` : `${ids.length} back in the scan`);
+    if (r.job) pollJobs();
+  } catch (e) { toast(e.message, true); }
+}
+function updateIgnoredNote() {
+  const n = S.settings.ignored_count || 0;
+  $("ignored-note").textContent = n ? `${n} ignored image${n === 1 ? " is" : "s are"} left out of every scan. Review them under the Ignored filter.`
+    : "No ignored images. Use Ignore under an image to keep it out of scans.";
+  $("clear-ignored").hidden = !n;
+}
+$("clear-ignored").onclick = async () => {
+  if (!confirm("Stop ignoring all images? They are checked again and show under Off grid if they don't fit.")) return;
+  try { await api("/api/ignored", { method: "DELETE" }); S.settings = await api("/api/settings"); updateIgnoredNote(); pollJobs(); }
+  catch (e) { toast(e.message, true); }
+};
 $("do-convert").onclick = () => {
-  const ids = selected().map(i => i.media_id);
-  const photos = selected().filter(i => i.category === "photo").length;
+  const pool = selected().filter(i => i.status !== "ignored");
+  const ids = pool.map(i => i.media_id);
+  const photos = pool.filter(i => i.category === "photo").length;
   if (photos && !confirm(`${photos} of these are model or lifestyle shots. Cutting those out rarely works well. Convert anyway?`)) return;
   startJob("/api/convert", { ids }, `Converting ${ids.length} images. Nothing changes in Shopify yet.`);
   S.filter = "converted";
@@ -497,6 +564,7 @@ $("do-restore").onclick = () => {
 (async () => {
   S.settings = await api("/api/settings");
   fillSettings();
+  updateIgnoredNote();
   await loadImages();
   loadTypes();
   pollJobs();
