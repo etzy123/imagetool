@@ -169,7 +169,7 @@
   <p>Every check and every conversion uses these values. Height mode gives every product the same height and lets the width vary, which keeps grid rows level. Fit box mode scales each product until it touches the box, so wide items end up shorter.</p>
   <div class="fields">
     <label>Size by<select id="c-fit_mode"><option value="height">Height (width may vary)</option><option value="box">Fit box (height and width)</option></select></label>
-    <label>Max width in height mode (px)<input type="number" id="c-max_w"></label>
+    <label>Side margin in the grid (0.10 = 10% each side)<input type="number" step="0.01" id="c-side_margin"></label>
     <label>Canvas width (px)<input type="number" id="c-canvas_w"></label>
     <label>Canvas height (px)<input type="number" id="c-canvas_h"></label>
     <label>Fit box width (px)<input type="number" id="c-box_w"></label>
@@ -243,7 +243,7 @@ document.querySelectorAll("[data-panel]").forEach(b => b.onclick = () => {
 });
 
 /* settings */
-const SET_KEYS = ["fit_mode", "max_w", "canvas_w", "canvas_h", "box_w", "box_h", "scale_tol", "center_tol", "card_ratio_w", "card_ratio_h", "card_bg", "excluded_types"];
+const SET_KEYS = ["fit_mode", "side_margin", "canvas_w", "canvas_h", "box_w", "box_h", "scale_tol", "center_tol", "card_ratio_w", "card_ratio_h", "card_bg", "excluded_types"];
 function fillSettings() {
   for (const k of SET_KEYS) {
     const v = S.settings[k];
@@ -251,7 +251,7 @@ function fillSettings() {
   }
   const s = S.settings;
   $("margins").textContent = s.fit_mode === "height"
-    ? `Every product ${s.box_h} px tall, ${(s.canvas_h - s.box_h) / 2} px above and below, at most ${s.width_limit} px wide. The grid shows the middle ${s.visible_w} px of the canvas width; wider products are kept narrower so they aren't cut off.`
+    ? `Every product ${s.box_h} px tall, ${(s.canvas_h - s.box_h) / 2} px above and below, at most ${s.width_limit} px wide. The grid shows the middle ${s.visible_w} px of the canvas width, so wide products keep ${Math.round(s.side_margin * 100)}% of the card free on each side.`
     : `Margins: ${(s.canvas_w - s.box_w) / 2} px left and right, ${(s.canvas_h - s.box_h) / 2} px top and bottom.`;
   $("mode-note").textContent = s.fit_mode === "height"
     ? `Checking by height: every product should be ${s.box_h} px tall on a ${s.canvas_w} × ${s.canvas_h} canvas.`

@@ -166,8 +166,14 @@ def analyze(data: bytes, spec: dict, orig_w: int = None, orig_h: int = None, for
         reasons.append(f"Low resolution ({W}×{H})")
     size_word = "height" if spec.get("fit_mode") == "height" else "size"
     tol = spec["scale_tol"]
+    vis_px = min(W, H * spec["card_ratio_w"] / spec["card_ratio_h"])
+    card_share = (x1 - x0) / w * W / vis_px            # share of the card width the product uses
+    max_share = width_limit(spec) / visible_width(spec)
+    width_bound = width_limit(spec) / aspect < bh
     if fill < 1 - tol:
         reasons.append(f"Product too small ({fill:.0%} of standard {size_word})")
+    elif fill > 1 + tol and width_bound and card_share > max_share * (1 + tol):
+        reasons.append(f"Too wide: uses {card_share:.0%} of the card width, max is {max_share:.0%}")
     elif fill > 1 + tol:
         reasons.append(f"Product too large ({fill:.0%} of standard {size_word})")
     vis = min(W, H * spec["card_ratio_w"] / spec["card_ratio_h"])
@@ -198,10 +204,14 @@ def visible_width(spec):
 
 
 def width_limit(spec):
-    """Widest a product may be: max width (height mode) or fit box width, but never
-    wider than the visible part of the card minus a 4% margin on each side."""
-    lim = (spec.get("max_w") or spec["canvas_w"]) if spec.get("fit_mode") == "height" else spec["box_w"]
-    return min(lim, visible_width(spec) * 0.92)
+    """Widest a product may be: the visible part of the card minus the side margin
+    (side_margin is a share of the card width, per side). In fit-box mode the box
+    width is a ceiling too."""
+    m = float(spec.get("side_margin", 0.10))
+    lim = visible_width(spec) * (1 - 2 * m)
+    if spec.get("fit_mode") != "height":
+        lim = min(lim, spec["box_w"])
+    return lim
 
 
 def cutout(im: Image.Image) -> Image.Image:

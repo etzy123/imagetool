@@ -335,15 +335,17 @@ def get_settings():
 async def put_settings(request: Request):
     body = await request.json()
     s = db.get_settings()
-    for k in ("canvas_w", "canvas_h", "box_w", "box_h", "max_w", "card_ratio_w", "card_ratio_h", "bg_tol"):
+    for k in ("canvas_w", "canvas_h", "box_w", "box_h", "card_ratio_w", "card_ratio_h", "bg_tol"):
         if k in body:
             body[k] = int(body[k])
-    for k in ("scale_tol", "center_tol", "uniform_min"):
+    for k in ("scale_tol", "center_tol", "uniform_min", "side_margin"):
         if k in body:
             body[k] = float(body[k])
     merged = {**s, **body}
-    if merged["box_w"] > merged["canvas_w"] or merged["box_h"] > merged["canvas_h"] or merged["max_w"] > merged["canvas_w"]:
-        raise HTTPException(400, "The fit box and max width can't be larger than the canvas")
+    if merged["box_w"] > merged["canvas_w"] or merged["box_h"] > merged["canvas_h"]:
+        raise HTTPException(400, "The fit box can't be larger than the canvas")
+    if not 0 <= merged["side_margin"] <= 0.3:
+        raise HTTPException(400, "Side margin must be between 0 and 0.30")
     if merged["fit_mode"] not in ("height", "box"):
         raise HTTPException(400, "Size by must be height or box")
     db.save_settings(body)

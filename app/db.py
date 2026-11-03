@@ -17,7 +17,7 @@ DEFAULTS = {
     "canvas_w": 2000, "canvas_h": 2000,
     "box_w": 1256, "box_h": 1256,
     "fit_mode": "height",       # "height": same height for every product, width varies; "box": fit inside the box
-    "max_w": 1360,              # height mode: widest a product may become (also capped to the visible card width)
+    "side_margin": 0.10,        # empty space on each side of the card, as share of the card width
     "scale_tol": 0.04,          # product may be 4% smaller or larger than the fit box
     "center_tol": 0.02,         # 2% of the canvas off-centre is allowed
     "uniform_min": 0.97,        # share of border pixels that must match for a "plain" background
