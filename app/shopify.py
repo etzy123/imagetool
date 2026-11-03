@@ -79,6 +79,16 @@ class Shopify:
             raise ShopifyError(f"Collection '{handle}' not found")
         return nodes[0]["id"].rsplit("/", 1)[1]
 
+    def product_types(self):
+        """All product types in the store."""
+        try:
+            d = self.gql("query{productTypes(first:250){nodes}}")
+            types = d["productTypes"]["nodes"]
+        except ShopifyError:
+            d = self.gql("query{shop{productTypes(first:250){edges{node}}}}")
+            types = [e["node"] for e in d["shop"]["productTypes"]["edges"]]
+        return sorted({t for t in types if t}, key=str.lower)
+
     def count_products(self, q):
         d = self.gql("query($q:String){productsCount(query:$q, limit:null){count}}", {"q": q})
         return d["productsCount"]["count"]

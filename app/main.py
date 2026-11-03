@@ -111,6 +111,9 @@ def build_query(p, sh):
             parts.append(f"{field}:{_q(p[key].strip())}")
     if p.get("collection"):
         parts.append(f"collection_id:{sh.collection_id(p['collection'].strip())}")
+    # Skipped product types (shoes, apparel, ...) are left out of the scan entirely.
+    for t in db.get_settings()["excluded_types"]:
+        parts.append(f'-product_type:"{t}"')
     return " AND ".join(parts) or None
 
 
@@ -338,6 +341,8 @@ async def put_settings(request: Request):
     for k in ("canvas_w", "canvas_h", "box_w", "box_h", "card_ratio_w", "card_ratio_h", "bg_tol"):
         if k in body:
             body[k] = int(body[k])
+    if "excluded_types" in body:
+        body["excluded_types"] = [t for t in body["excluded_types"] if isinstance(t, str) and t.strip()]
     for k in ("scale_tol", "center_tol", "uniform_min", "side_margin"):
         if k in body:
             body[k] = float(body[k])
@@ -350,6 +355,14 @@ async def put_settings(request: Request):
         raise HTTPException(400, "Size by must be height or box")
     db.save_settings(body)
     return _settings_out()
+
+
+@app.get("/api/product-types")
+def product_types():
+    try:
+        return shop().product_types()
+    except Exception as e:
+        raise HTTPException(502, f"Could not load product types from Shopify: {e}")
 
 
 @app.post("/api/scan")

@@ -60,6 +60,12 @@
   #job .jobtext { min-width: 220px; }
   .mark { margin-top: 6px; font-size: 12px; color: var(--muted); background: none; border: 0; padding: 0;
     cursor: pointer; text-decoration: underline; }
+  .types { margin-top: 18px; }
+  .row.tight { margin: 4px 0 10px; gap: 14px; }
+  .linkbtn { background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline; color: var(--ink); font-size: 14px; }
+  .typelist { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 4px 16px;
+    max-height: 260px; overflow-y: auto; padding: 10px; background: var(--page); border: 1px solid var(--line); border-radius: 4px; }
+  .typelist .check { font-size: 14px; }
   .reset { font-size: 14px; color: var(--muted); background: none; border: 0; cursor: pointer; text-decoration: underline; padding: 6px 4px; margin-left: 12px; }
 
   .filters { display: flex; gap: 4px; padding: 28px 40px 0; flex-wrap: wrap; align-items: center; }
@@ -132,7 +138,7 @@
 </nav>
 
 <section class="panel" id="scan" hidden>
-  <p>Checks the chosen images of every matching product against the size standard. Nothing changes in Shopify. Leave the filters empty to scan everything.</p>
+  <p>Checks the chosen images of every matching product against the size standard. Nothing changes in Shopify. Leave the filters empty to scan all ticked product types.</p>
   <p class="hint" id="mode-note"></p>
   <div class="fields">
     <label>Product type<input type="text" id="s-type" placeholder="Jackets"></label>
@@ -153,6 +159,16 @@
       <label class="check"><input type="radio" name="s-status" value="all"> All, including archived</label>
     </fieldset>
   </div>
+  <fieldset class="types">
+    <legend>Product types to check <span class="hint" id="types-count"></span></legend>
+    <div class="row tight">
+      <button class="linkbtn" id="types-apparel">Skip apparel</button>
+      <button class="linkbtn" id="types-all">Check all</button>
+      <button class="linkbtn" id="types-none">Check none</button>
+      <span class="hint">Unticked types are skipped in scans and hidden from the list. Saved for next time.</span>
+    </div>
+    <div class="typelist" id="typelist"><span class="hint">Loading product types from Shopify</span></div>
+  </fieldset>
   <div class="row">
     <span class="spacer"></span>
     <button class="btn solid" id="do-scan">Scan catalog</button>
@@ -179,7 +195,6 @@
     <label>Card width in shop grid<input type="number" id="c-card_ratio_w"></label>
     <label>Card height in shop grid<input type="number" id="c-card_ratio_h"></label>
     <label>Card colour<input type="text" id="c-card_bg"></label>
-    <label>Skip product types (comma separated)<input type="text" id="c-excluded_types"></label>
   </div>
   <div class="row">
     <span class="hint" id="margins"></span>
@@ -243,7 +258,7 @@ document.querySelectorAll("[data-panel]").forEach(b => b.onclick = () => {
 });
 
 /* settings */
-const SET_KEYS = ["fit_mode", "side_margin", "canvas_w", "canvas_h", "box_w", "box_h", "scale_tol", "center_tol", "card_ratio_w", "card_ratio_h", "card_bg", "excluded_types"];
+const SET_KEYS = ["fit_mode", "side_margin", "canvas_w", "canvas_h", "box_w", "box_h", "scale_tol", "center_tol", "card_ratio_w", "card_ratio_h", "card_bg"];
 function fillSettings() {
   for (const k of SET_KEYS) {
     const v = S.settings[k];
@@ -260,7 +275,6 @@ function fillSettings() {
 $("do-settings").onclick = async () => {
   const body = {};
   for (const k of SET_KEYS) body[k] = $("c-" + k).value;
-  body.excluded_types = body.excluded_types.split(",").map(x => x.trim()).filter(Boolean);
   try {
     S.settings = await api("/api/settings", { method: "PUT", body: JSON.stringify(body) });
     fillSettings(); render();
@@ -273,6 +287,34 @@ async function startJob(path, body, label) {
   try { await api(path, { method: "POST", body: JSON.stringify(body) }); toast(label); pollJobs(); }
   catch (e) { toast(e.message, true); }
 }
+/* product types: ticked = checked in scans, unticked = skipped and hidden */
+const APPAREL = /\b(shirts?|t-shirts?|tees?|polos?|tops?|jackets?|coats?|vests?|gilets?|sweat\w*|hood\w*|knit\w*|sweaters?|pullovers?|cardigans?|(quarter|half)[\s-]?zips?|fleeces?|mid[\s-]?layers?|layering|outerwear|rainwear|rain (jackets?|pants?)|pants?|trousers?|shorts?|skirts?|skorts?|dress(es)?|joggers?|leggings?|socks?|apparel|clothing|crew\w*|mock\w*|kleding|broek\w*|trui\w*|jas|jassen|vesten?)\b/i;
+async function loadTypes() {
+  let types = [];
+  try { types = await api("/api/product-types"); }
+  catch (e) { $("typelist").innerHTML = `<span class="hint">${esc(e.message)}</span>`; return; }
+  const skip = new Set(S.settings.excluded_types);
+  [...skip].forEach(t => { if (!types.includes(t)) types.push(t); });
+  $("typelist").innerHTML = types.map(t =>
+    `<label class="check"><input type="checkbox" value="${esc(t)}" ${skip.has(t) ? "" : "checked"}> ${esc(t)}</label>`).join("");
+  $("typelist").querySelectorAll("input").forEach(i => i.onchange = saveTypes);
+  countTypes();
+}
+function countTypes() {
+  const all = $("typelist").querySelectorAll("input"), on = [...all].filter(i => i.checked).length;
+  $("types-count").textContent = all.length ? `(${on} of ${all.length})` : "";
+}
+async function saveTypes() {
+  const excluded = [...$("typelist").querySelectorAll("input")].filter(i => !i.checked).map(i => i.value);
+  try { S.settings = await api("/api/settings", { method: "PUT", body: JSON.stringify({ excluded_types: excluded }) }); render(); }
+  catch (e) { toast(e.message, true); }
+  countTypes();
+}
+function setTypes(fn) { $("typelist").querySelectorAll("input").forEach(i => i.checked = fn(i.value)); saveTypes(); }
+$("types-apparel").onclick = () => setTypes(t => !APPAREL.test(t) && !/foot|shoe/i.test(t));
+$("types-all").onclick = () => setTypes(() => true);
+$("types-none").onclick = () => setTypes(() => false);
+
 $("do-scan").onclick = () => {
   const positions = [[1, "s-pos1"], [2, "s-pos2"]].filter(([, id]) => $(id).checked).map(([n]) => n);
   if (!positions.length) return toast("Tick at least one image to check.", true);
@@ -315,7 +357,7 @@ async function loadImages() { S.images = await api("/api/images"); render(); }
 function render() {
   const f = $("filters");
   f.innerHTML = FILTERS.map(([key, label, fn]) =>
-    `<button class="filter" aria-pressed="${S.filter === key}" data-f="${key}">${label}<span class="n">${S.images.filter(fn).length}</span></button>`
+    `<button class="filter" aria-pressed="${S.filter === key}" data-f="${key}">${label}<span class="n">${visible().filter(fn).length}</span></button>`
   ).join("") + (S.images.length ? `<button class="reset" id="reset">Reset list</button>` : "") + `<span class="spacer"></span><label class="check toggle"><input type="checkbox" id="boxtoggle" ${document.body.classList.contains("showbox") ? "checked" : ""}> Show ${S.settings.fit_mode === "height" ? "height lines" : "fit box"}</label>`;
   f.querySelectorAll("[data-f]").forEach(b => b.onclick = () => { S.filter = b.dataset.f; render(); });
   $("boxtoggle").onchange = e => document.body.classList.toggle("showbox", e.target.checked);
@@ -327,7 +369,7 @@ function render() {
   };
 
   const fn = FILTERS.find(x => x[0] === S.filter)[2];
-  const list = S.images.filter(fn);
+  const list = visible().filter(fn);
   const g = $("grid");
   if (!list.length) {
     g.innerHTML = S.images.length
@@ -348,6 +390,7 @@ function render() {
   updateActions();
 }
 const imgById = id => S.images.find(i => i.media_id === id);
+function visible() { const skip = new Set(S.settings.excluded_types); return S.images.filter(i => !skip.has(i.product_type)); }
 
 function card(i) {
   const s = S.settings, id = i.media_id;
@@ -421,7 +464,7 @@ async function setSel(ids, val) {
   render();
   api("/api/select", { method: "POST", body: JSON.stringify({ ids, selected: val }) }).catch(e => toast(e.message, true));
 }
-function selected() { return S.images.filter(i => i.selected); }
+function selected() { return visible().filter(i => i.selected); }
 function updateActions() {
   const sel = selected(), n = sel.length;
   $("actions").classList.toggle("on", n > 0);
@@ -431,7 +474,7 @@ function updateActions() {
   $("do-replace").textContent = conv ? `Replace ${conv} in Shopify` : "Replace in Shopify";
   $("do-restore").disabled = !sel.some(i => i.backup_path);
 }
-$("sel-all").onclick = () => setSel(S.images.filter(FILTERS.find(x => x[0] === S.filter)[2]).map(i => i.media_id), true);
+$("sel-all").onclick = () => setSel(visible().filter(FILTERS.find(x => x[0] === S.filter)[2]).map(i => i.media_id), true);
 $("sel-none").onclick = () => setSel(selected().map(i => i.media_id), false);
 $("do-convert").onclick = () => {
   const ids = selected().map(i => i.media_id);
@@ -455,6 +498,7 @@ $("do-restore").onclick = () => {
   S.settings = await api("/api/settings");
   fillSettings();
   await loadImages();
+  loadTypes();
   pollJobs();
 })();
 </script>

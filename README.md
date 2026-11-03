@@ -11,7 +11,7 @@ Finds product images that don't fit the collection grid, lets you review them, a
 5. **Replace in Shopify**: backs up the original, uploads the new file and swaps it in place. Gallery position, alt text and variant links stay intact. The result is re-checked on the live image.
 6. **Restore original**: puts the backed-up original back.
 
-Skipped automatically: product types in the skip list (default `Footwear`), detail shots that fill the frame, and model or lifestyle shots. A model shot is recognised by a busy background, a face, or a body cut off by the top or bottom edge. Model shots never appear in the flatlay views; they have their own **Model shots** filter. If the app gets one wrong, use **Model shot** or **Not a model shot** under the image; that choice is kept on every later scan.
+Product types: the scan panel lists all product types from Shopify. Unticked types are skipped in scans and hidden from the list; **Skip apparel** unticks clothing and footwear in one click (check the result, it matches on the type name). Also skipped automatically: detail shots that fill the frame, and model or lifestyle shots. A model shot is recognised by a busy background, a face, or a body cut off by the top or bottom edge. Model shots never appear in the flatlay views; they have their own **Model shots** filter. If the app gets one wrong, use **Model shot** or **Not a model shot** under the image; that choice is kept on every later scan.
 
 ## Deploy on Railway
 
